@@ -1,0 +1,16 @@
+# cmdproxy shim configuration
+# Place at ~/.config/cmdproxy/shim.toml
+
+# Default SSH target for all proxied commands
+target = "user@server.example.com"
+
+# Per-command overrides
+[command.kubectl]
+target = "user@k8s-bastion.example.com"
+stdin = true   # allow stdin passthrough (e.g. for piping manifests)
+
+[command.az]
+# uses default target
+
+[command.jq]
+stdin = true

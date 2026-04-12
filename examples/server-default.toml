@@ -1,0 +1,25 @@
+# cmdproxy server profile configuration
+# Place at ~/.config/cmdproxy/profiles/default.toml
+
+[command.az]
+allow = [
+    "account show *",
+    "group list *",
+    "resource list *",
+]
+deny = []
+
+[command.kubectl]
+allow = [
+    "get *",
+    "describe *",
+    "logs *",
+]
+deny = [
+    "delete *",
+    "apply *",
+    "edit *",
+]
+
+[command.jq]
+allow = ["*"]   # allow all args
