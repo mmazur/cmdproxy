@@ -41,7 +41,8 @@ func main() {
 		os.Exit(127)
 	}
 
-	sshCmd := exec.Command("ssh", target, encoded)
+	args := append(cfg.SSHArgsForCommand(cmdName), target, encoded)
+	sshCmd := exec.Command("ssh", args...)
 	sshCmd.Stdout = os.Stdout
 	sshCmd.Stderr = os.Stderr
 	if cfg.StdinEnabled(cmdName) {

@@ -4,9 +4,13 @@
 # Default SSH target for all proxied commands
 target = "user@server.example.com"
 
+# Extra arguments passed to ssh (before target), e.g. custom port or identity
+# ssh_args = ["-p", "2222", "-i", "~/.ssh/special_key"]
+
 # Per-command overrides
 [command.kubectl]
 target = "user@k8s-bastion.example.com"
+ssh_args = ["-p", "2222"]
 stdin = true   # allow stdin passthrough (e.g. for piping manifests)
 
 [command.az]

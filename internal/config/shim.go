@@ -9,12 +9,14 @@ import (
 )
 
 type ShimCommandConfig struct {
-	Target string `toml:"target"`
-	Stdin  bool   `toml:"stdin"`
+	Target  string   `toml:"target"`
+	SSHArgs []string `toml:"ssh_args"`
+	Stdin   bool     `toml:"stdin"`
 }
 
 type ShimConfig struct {
 	Target   string                       `toml:"target"`
+	SSHArgs  []string                     `toml:"ssh_args"`
 	Commands map[string]ShimCommandConfig `toml:"command"`
 }
 
@@ -37,6 +39,13 @@ func (c *ShimConfig) TargetForCommand(cmd string) string {
 		return cc.Target
 	}
 	return c.Target
+}
+
+func (c *ShimConfig) SSHArgsForCommand(cmd string) []string {
+	if cc, ok := c.Commands[cmd]; ok && len(cc.SSHArgs) > 0 {
+		return cc.SSHArgs
+	}
+	return c.SSHArgs
 }
 
 func (c *ShimConfig) StdinEnabled(cmd string) bool {
