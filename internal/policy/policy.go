@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gobwas/glob"
-
 	"github.com/mmazur/cmdproxy/internal/config"
+	"github.com/mmazur/cmdproxy/internal/policy/argmatch"
 )
 
 type Verdict int
@@ -34,27 +33,34 @@ func Evaluate(cfg config.ServerConfig, cmd string, args []string) Decision {
 		return Decision{Deny, fmt.Sprintf("command %q not in allowlist", cmd)}
 	}
 
-	argsStr := strings.Join(args, " ")
+	argsStr := strings.ToLower(strings.Join(args, " "))
 
-	for _, pattern := range cc.Deny {
-		g, err := glob.Compile(pattern)
-		if err != nil {
-			return Decision{Deny, fmt.Sprintf("bad deny glob %q: %v", pattern, err)}
-		}
-		if g.Match(argsStr) {
-			return Decision{Deny, fmt.Sprintf("args matched deny pattern %q", pattern)}
+	for _, rule := range cc.Deny {
+		if matchRule(rule, argsStr, args) {
+			reason := "args matched deny pattern"
+			if rule.LegacyGlob != "" {
+				reason = fmt.Sprintf("args matched deny pattern %q", rule.LegacyGlob)
+			}
+			return Decision{Deny, reason}
 		}
 	}
 
-	for _, pattern := range cc.Allow {
-		g, err := glob.Compile(pattern)
-		if err != nil {
-			return Decision{Deny, fmt.Sprintf("bad allow glob %q: %v", pattern, err)}
-		}
-		if g.Match(argsStr) {
-			return Decision{Allow, fmt.Sprintf("args matched allow pattern %q", pattern)}
+	for _, rule := range cc.Allow {
+		if matchRule(rule, argsStr, args) {
+			reason := "args matched positional allow rule"
+			if rule.LegacyGlob != "" {
+				reason = fmt.Sprintf("args matched allow pattern %q", rule.LegacyGlob)
+			}
+			return Decision{Allow, reason}
 		}
 	}
 
 	return Decision{Deny, "no allow pattern matched"}
+}
+
+func matchRule(rule config.Rule, argsStr string, args []string) bool {
+	if rule.LegacyGlob != "" {
+		return rule.Compiled.Match(argsStr)
+	}
+	return argmatch.Match(rule.Segments, args)
 }
