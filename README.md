@@ -43,12 +43,12 @@ A glob pattern matched against all arguments joined with spaces:
 
 ```toml
 allow = [
-    "account show *",
-    "acr list *",
+    'account show *',
+    'acr list *',
 ]
 deny = [
-    "* --delete*",
-    "* --force*",
+    '* --delete*',
+    '* --force*',
 ]
 ```
 
@@ -58,13 +58,13 @@ An array where each element is matched against individual arguments, giving prec
 
 ```toml
 allow = [
-    ["account", "show"],                    # exactly these two args
-    ["acr", "show", "*"],                   # acr show <anything>
-    ["[a-z]*:+", "--help"],                 # one or more subcommands, then --help
-    ["[a-z]*:*", "list*", "*:*"],           # optional subcommands, a list* arg, then anything
+    ['account', 'show'],                    # exactly these two args
+    ['acr', 'show', '*'],                   # acr show <anything>
+    ['[a-z]*:+', '--help'],                 # one or more subcommands, then --help
+    ['[a-z]*:*', 'list*', '*:*'],           # optional subcommands, a list* arg, then anything
 ]
 deny = [
-    ["[a-z]*:*", "delete", "*:*"],          # deny "delete" as a positional subcommand
+    ['[a-z]*:*', 'delete', '*:*'],          # deny "delete" as a positional subcommand
 ]
 ```
 
@@ -84,7 +84,7 @@ Each element has the form `glob_pattern[:quantifier]`.
 | `:N+` | N or more (e.g. `:2+`) |
 | `:N-M` | between N and M inclusive (e.g. `:2-5`) |
 
-Literal colons in glob patterns must be escaped as `\:`. Only one unescaped colon is allowed per element. Invalid quantifiers are rejected at config load time.
+Literal colons in glob patterns must be escaped as `\:`. This works directly in single-quoted TOML strings (`'https\://*.example.com'`). In double-quoted strings, backslashes are TOML escape characters, so you need `"https\\://*.example.com"` instead. Prefer single-quoted strings to avoid this issue. Only one unescaped colon is allowed per element. Invalid quantifiers are rejected at config load time.
 
 **Examples:**
 
@@ -92,26 +92,26 @@ Literal colons in glob patterns must be escaped as `\:`. Only one unescaped colo
 [command.az]
 allow = [
     # Legacy glob: account show with any trailing args
-    "account show *",
+    'account show *',
 
     # Any subcommand path ending in --help
-    ["[a-z]*:+", "--help"],
+    ['[a-z]*:+', '--help'],
 
     # Any subcommand path, then a list* command, then any trailing args
-    ["[a-z]*:*", "list*", "*:*"],
+    ['[a-z]*:*', 'list*', '*:*'],
 
     # Exact: acr login with one argument
-    ["acr", "login", "*"],
+    ['acr', 'login', '*'],
 
     # Exact: account get-access-token with specific flags
-    ["account", "get-access-token", "-o", "json", "--resource", "*"],
+    ['account', 'get-access-token', '-o', 'json', '--resource', '*'],
 ]
 deny = [
     # Glob: deny --delete anywhere in args
-    "* --delete*",
+    '* --delete*',
 
     # Positional: deny "delete" as a subcommand
-    ["[a-z]*:*", "delete", "*:*"],
+    ['[a-z]*:*', 'delete', '*:*'],
 ]
 ```
 
