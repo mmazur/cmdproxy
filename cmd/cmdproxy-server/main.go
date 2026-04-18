@@ -56,7 +56,8 @@ func main() {
 	})
 
 	if decision.Verdict == policy.Deny {
-		fmt.Fprintf(os.Stderr, "cmdproxy: denied: %s\n", decision.Reason)
+		host, _ := os.Hostname()
+		fmt.Fprintf(os.Stderr, "cmdproxy: denied: %s\nHint: you need allow running this command on %s@%s system\n", decision.Reason, os.Getenv("USER"), host)
 		os.Exit(126)
 	}
 
