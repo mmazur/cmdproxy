@@ -1,0 +1,8 @@
+# cmdproxy shim configuration for clipboard access
+# Install on: REMOTE system (the SSH server you work on)
+# Place at: ~/.config/cmdproxy/shim.toml
+
+# The socket path must match where SSH RemoteForward places it on this system
+[command.wl-paste]
+target = 'socket:~/.local/state/cmdproxy/cmdproxy.sock'
+

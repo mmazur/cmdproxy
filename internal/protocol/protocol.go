@@ -14,6 +14,13 @@ type Request struct {
 	Args []string `json:"args"`
 }
 
+type Response struct {
+	ExitCode int    `json:"exit_code"`
+	Stdout   []byte `json:"stdout,omitempty"`
+	Stderr   []byte `json:"stderr,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 func Encode(r Request) (string, error) {
 	j, err := json.Marshal(r)
 	if err != nil {

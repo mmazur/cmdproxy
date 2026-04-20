@@ -1,0 +1,15 @@
+# systemd socket unit for cmdproxy socket mode
+# Install on: LOCAL desktop
+# Place at: ~/.config/systemd/user/cmdproxy.socket
+# Enable: systemctl --user enable --now cmdproxy.socket
+
+[Unit]
+Description=cmdproxy socket server
+
+[Socket]
+ListenStream=%h/.local/state/cmdproxy/cmdproxy.sock
+DirectoryMode=0700
+Accept=yes
+
+[Install]
+WantedBy=sockets.target

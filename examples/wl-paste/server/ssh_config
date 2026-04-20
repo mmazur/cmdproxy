@@ -1,0 +1,23 @@
+# SSH config snippet for forwarding the cmdproxy socket to a remote system
+# Install on: LOCAL desktop
+# Add to: ~/.ssh/config
+
+Host my-remote-server
+    HostName remote.example.com
+    User myuser
+
+    # Forward the local cmdproxy socket to the remote system
+    RemoteForward ~/.local/state/cmdproxy/cmdproxy.sock %d/.local/state/cmdproxy/cmdproxy.sock
+
+    # Remove stale socket files on the remote before binding
+    StreamLocalBindUnlink yes
+
+    # Don't fail the SSH connection if the forward can't be set up
+    # (e.g. another session already has it via multiplexing)
+    ExitOnForwardFailure no
+
+    # Multiplex all sessions over one connection so only one socket
+    # forward exists regardless of how many terminals are open
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%C
+    ControlPersist 10m

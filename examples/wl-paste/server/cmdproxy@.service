@@ -1,0 +1,12 @@
+# systemd service unit for cmdproxy socket mode (template, one instance per connection)
+# Install on: LOCAL desktop
+# Place at: ~/.config/systemd/user/cmdproxy@.service
+
+[Unit]
+Description=cmdproxy socket connection
+
+[Service]
+Type=oneshot
+StandardInput=socket
+StandardOutput=socket
+ExecStart=%h/.local/bin/cmdproxy-server --socket

@@ -1,0 +1,7 @@
+# cmdproxy server profile for clipboard access
+# Install on: LOCAL desktop (your Wayland workstation)
+# Place at: ~/.config/cmdproxy/profiles/default.toml
+
+[command.wl-paste]
+allow = ['*']
+

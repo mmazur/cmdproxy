@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -53,4 +54,52 @@ func (c *ShimConfig) StdinEnabled(cmd string) bool {
 		return cc.Stdin
 	}
 	return false
+}
+
+type TargetMode int
+
+const (
+	TargetSSH    TargetMode = iota
+	TargetSocket
+)
+
+type Target struct {
+	Mode TargetMode
+	Addr string // ssh user@host or socket path
+}
+
+func ParseTarget(raw string) (Target, error) {
+	if strings.HasPrefix(raw, "socket:") {
+		path, err := expandSocketPath(strings.TrimPrefix(raw, "socket:"))
+		if err != nil {
+			return Target{}, err
+		}
+		return Target{Mode: TargetSocket, Addr: path}, nil
+	}
+	return Target{Mode: TargetSSH, Addr: raw}, nil
+}
+
+func expandSocketPath(raw string) (string, error) {
+	if raw == "" {
+		return "", fmt.Errorf("socket path is empty")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+
+	if raw == "~" {
+		raw = home
+	} else if strings.HasPrefix(raw, "~/") {
+		raw = filepath.Join(home, raw[2:])
+	}
+
+	raw = strings.ReplaceAll(raw, "$HOME", home)
+
+	if !filepath.IsAbs(raw) {
+		return "", fmt.Errorf("socket path must be absolute (start with / or ~), got: %s", raw)
+	}
+
+	return filepath.Clean(raw), nil
 }

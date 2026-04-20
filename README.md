@@ -115,6 +115,42 @@ deny = [
 ]
 ```
 
+## Socket mode
+
+In addition to SSH transport, cmdproxy supports Unix socket transport. This is useful for forwarding commands *back* to your local machine over an existing SSH connection, without opening a reverse SSH server.
+
+The typical use case is clipboard access: run `wl-paste` on a remote system and have it execute on your local Wayland desktop.
+
+```
+remote server                         local desktop
+─────────────                         ─────────────
+./wl-paste
+  → cmdproxy-shim
+    → connect to forwarded Unix socket
+                                      → cmdproxy-server --socket
+                                        → policy check
+                                          → allowed → exec wl-paste
+                                          → denied  → error in response
+  ← JSON response (stdout, stderr, exit code)
+```
+
+### Socket target
+
+Configure the shim to use a socket instead of SSH by using the `socket:` prefix in the target:
+
+```toml
+[command.wl-paste]
+target = 'socket:~/.local/state/cmdproxy/cmdproxy.sock'
+```
+
+Socket paths must be absolute. `~` and `$HOME` are expanded. Relative paths are rejected.
+
+### Server
+
+The server runs in socket mode with `--socket`. It reads a JSON request from stdin, evaluates policy, executes the command, and writes a JSON response to stdout. This is designed for systemd socket activation with `Accept=yes`, where each connection spawns a fresh server process.
+
+See [`examples/wl-paste/`](examples/wl-paste/) for a complete worked example with systemd units, SSH config, and shim/server configuration.
+
 ## Building
 
 ```
@@ -125,7 +161,7 @@ make test         # run tests
 
 ## Configuration
 
-See `examples/` for annotated config files.
+See `examples/` for annotated config files and `examples/wl-paste/` for a complete socket mode setup.
 
 - Client: `~/.config/cmdproxy/shim.toml`
 - Server: `~/.config/cmdproxy/profiles/default.toml`

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,6 +25,14 @@ type logEntry struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--socket" {
+		runSocket()
+		return
+	}
+	runSSH()
+}
+
+func runSSH() {
 	start := time.Now()
 
 	origCmd := os.Getenv("SSH_ORIGINAL_COMMAND")
@@ -72,6 +81,84 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cmdproxy-server: exec: %v\n", err)
 		os.Exit(126)
 	}
+}
+
+func runSocket() {
+	start := time.Now()
+
+	var req protocol.Request
+	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Error:    fmt.Sprintf("decode: %v", err),
+		})
+		return
+	}
+
+	cfg, err := config.LoadServerConfig("default")
+	if err != nil {
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Error:    fmt.Sprintf("config: %v", err),
+		})
+		return
+	}
+
+	decision := policy.Evaluate(cfg, req.Cmd, req.Args)
+
+	writeLog(logEntry{
+		Timestamp:  start.UTC().Format(time.RFC3339),
+		Command:    req.Cmd,
+		Args:       req.Args,
+		Decision:   decision.Verdict.String(),
+		Reason:     decision.Reason,
+		DurationMs: time.Since(start).Milliseconds(),
+	})
+
+	if decision.Verdict == policy.Deny {
+		host, _ := os.Hostname()
+		msg := fmt.Sprintf("cmdproxy: denied: %s\nHint: you need allow running this command on %s@%s system\n",
+			decision.Reason, os.Getenv("USER"), host)
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Stderr:   []byte(msg),
+		})
+		return
+	}
+
+	binPath, err := exec.LookPath(req.Cmd)
+	if err != nil {
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 127,
+			Error:    fmt.Sprintf("command not found: %s", req.Cmd),
+		})
+		return
+	}
+
+	cmd := exec.Command(binPath, req.Args...)
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	exitCode := 0
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			json.NewEncoder(os.Stdout).Encode(protocol.Response{
+				ExitCode: 126,
+				Stderr:   stderrBuf.Bytes(),
+				Error:    fmt.Sprintf("exec: %v", err),
+			})
+			return
+		}
+	}
+
+	json.NewEncoder(os.Stdout).Encode(protocol.Response{
+		ExitCode: exitCode,
+		Stdout:   stdoutBuf.Bytes(),
+		Stderr:   stderrBuf.Bytes(),
+	})
 }
 
 func writeLog(entry logEntry) {
