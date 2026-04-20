@@ -140,7 +140,7 @@ Configure the shim to use a socket instead of SSH by using the `socket:` prefix 
 
 ```toml
 [command.wl-paste]
-target = 'socket:~/.local/state/cmdproxy/cmdproxy.sock'
+target = 'socket:~/.cmdproxy.sock'
 ```
 
 Socket paths must be absolute. `~` and `$HOME` are expanded. Relative paths are rejected.

@@ -2,12 +2,15 @@
 # Install on: LOCAL desktop
 # Add to: ~/.ssh/config
 
-Host my-remote-server
+Host remote-server-1
     HostName remote.example.com
     User myuser
 
-    # Forward the local cmdproxy socket to the remote system
-    RemoteForward ~/.local/state/cmdproxy/cmdproxy.sock %d/.local/state/cmdproxy/cmdproxy.sock
+    # Forward the local cmdproxy socket to the remote system.
+    # %d = local home dir, %r = remote username.
+    # Assumes remote home dirs are at /home/<user>. Adjust if yours differ
+    # (e.g. /root for root, or a custom path).
+    RemoteForward /home/%r/.cmdproxy.sock %d/.local/state/cmdproxy/cmdproxy.sock
 
     # Remove stale socket files on the remote before binding
     StreamLocalBindUnlink yes

@@ -4,5 +4,5 @@
 
 # The socket path must match where SSH RemoteForward places it on this system
 [command.wl-paste]
-target = 'socket:~/.local/state/cmdproxy/cmdproxy.sock'
+target = 'socket:~/.cmdproxy.sock'
 
