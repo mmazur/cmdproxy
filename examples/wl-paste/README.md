@@ -57,14 +57,27 @@ cp server/default.toml ~/.config/cmdproxy/profiles/default.toml
 
 Add the `RemoteForward` block to `~/.ssh/config` (see `server/ssh_config`).
 
-### 5. Remote server — shim config
+### 5. Remote server — sshd config
+
+Add `StreamLocalBindUnlink yes` to `/etc/ssh/sshd_config` (see `server/sshd_config`),
+then reload sshd (the service is called `sshd` on Fedora/RHEL, `ssh` on Debian/Ubuntu):
+
+```
+sudo systemctl reload sshd   # Fedora/RHEL
+sudo systemctl reload ssh    # Debian/Ubuntu
+```
+
+Without this, if a previous SSH session left a stale socket behind, the new
+session silently fails to set up the `RemoteForward`.
+
+### 6. Remote server — shim config
 
 ```
 mkdir -p ~/.config/cmdproxy
 cp shim/shim.toml ~/.config/cmdproxy/shim.toml
 ```
 
-### 6. Remote server — create symlinks
+### 7. Remote server — create symlinks
 
 ```
 ln -s ~/.local/bin/cmdproxy-shim ~/.local/bin/wl-paste
@@ -72,7 +85,7 @@ ln -s ~/.local/bin/cmdproxy-shim ~/.local/bin/wl-paste
 
 Make sure `~/.local/bin` is in your `$PATH`.
 
-### 7. Test
+### 8. Test
 
 SSH into the remote server (the `RemoteForward` sets up the socket automatically),
 then run:
@@ -94,4 +107,5 @@ server/
   cmdproxy.socket         → local:  ~/.config/systemd/user/cmdproxy.socket
   cmdproxy@.service       → local:  ~/.config/systemd/user/cmdproxy@.service
   ssh_config             → local:  add to ~/.ssh/config
+  sshd_config            → remote: add to /etc/ssh/sshd_config
 ```

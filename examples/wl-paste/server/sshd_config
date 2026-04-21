@@ -1,0 +1,8 @@
+# sshd config snippet for cmdproxy socket forwarding
+# Install on: REMOTE system (the SSH server you work on)
+# Add to: /etc/ssh/sshd_config (then reload: systemctl reload sshd or ssh, depending on distro)
+
+# Remove stale socket files before binding a new RemoteForward socket.
+# Without this, if a previous SSH session left a dead socket behind,
+# the new session silently fails to set up the forward.
+StreamLocalBindUnlink yes
