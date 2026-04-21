@@ -1,13 +1,22 @@
 # cmdproxy
 
-A security boundary for giving AI agents scoped, read-only access to CLI tools on a remote system.
+A tool for giving AI agents scoped, read-only access to CLI tools — either hosted on a remote system over SSH or on your own desktop via a reverse-forwarded-over-ssh Unix socket.
 
-## How it works
+## Use cases
 
-cmdproxy has two components:
+- access to a select subset kubectl / az / aws / etc commands (LLM does not have the ability to just read the raw access token and issue its own commands)
+- ssh into a server, run Claude Code (or equivalent), have ctrl+v actually paste your local images (Linux-only; for now)
 
-- **cmdproxy-shim** — a client binary you symlink as local commands (`kubectl`, `az`, `jq`, etc.). When invoked, it forwards the command and arguments over SSH to a remote server.
-- **cmdproxy-server** — a server binary that runs as an SSH forced command. It evaluates the incoming request against a glob-based allow/deny policy, logs the decision, and either executes the command or rejects it.
+## Components
+
+- **cmdproxy-shim** — a client binary you symlink as local commands (`kubectl`, `az`, `wl-paste`, etc.). When invoked, it forwards the command and arguments to a server over SSH or a Unix socket.
+- **cmdproxy-server** — a server that evaluates the incoming request against a allow/deny policy, logs the decision, and either executes the command or rejects it.
+
+## Transport modes
+
+### SSH
+
+The primary use case: give an AI agent access to a subset of CLI tools' functionality without giving it access to the underlying auth tokens.
 
 ```
 local machine                          remote server
@@ -21,6 +30,43 @@ local machine                          remote server
                                            → denied  → exit 126
   ← stdout/stderr + exit code
 ```
+
+The server runs as an SSH forced command. Configure the shim target as an SSH destination:
+
+```toml
+[command.kubectl]
+target = 'user@server'
+```
+
+### Unix socket
+
+Forward commands back to your local machine over an existing SSH connection, without opening a reverse SSH server. Useful for clipboard access, local tool execution, or any case where the tool must run on the desktop side.
+
+```
+remote server                         local desktop
+─────────────                         ─────────────
+./wl-paste
+  → cmdproxy-shim
+    → connect to forwarded Unix socket
+                                      → cmdproxy-server --socket
+                                        → policy check
+                                          → allowed → exec wl-paste
+                                          → denied  → error in response
+  ← JSON response (stdout, stderr, exit code)
+```
+
+Configure the shim target with the `socket:` prefix:
+
+```toml
+[command.wl-paste]
+target = 'socket:~/.cmdproxy.sock'
+```
+
+Socket paths must be absolute. `~` and `$HOME` are expanded. Relative paths are rejected.
+
+The server runs in socket mode with `--socket`. It reads a JSON request from stdin, evaluates policy, executes the command, and writes a JSON response to stdout. This is designed for systemd socket activation with `Accept=yes`, where each connection spawns a fresh server process.
+
+See [`examples/wl-paste/`](examples/wl-paste/) for a complete worked example with systemd units, SSH config, and shim/server configuration.
 
 ## Policy
 
@@ -114,42 +160,6 @@ deny = [
     ['[a-z]*:*', 'delete', '*:*'],
 ]
 ```
-
-## Socket mode
-
-In addition to SSH transport, cmdproxy supports Unix socket transport. This is useful for forwarding commands *back* to your local machine over an existing SSH connection, without opening a reverse SSH server.
-
-The typical use case is clipboard access: run `wl-paste` on a remote system and have it execute on your local Wayland desktop.
-
-```
-remote server                         local desktop
-─────────────                         ─────────────
-./wl-paste
-  → cmdproxy-shim
-    → connect to forwarded Unix socket
-                                      → cmdproxy-server --socket
-                                        → policy check
-                                          → allowed → exec wl-paste
-                                          → denied  → error in response
-  ← JSON response (stdout, stderr, exit code)
-```
-
-### Socket target
-
-Configure the shim to use a socket instead of SSH by using the `socket:` prefix in the target:
-
-```toml
-[command.wl-paste]
-target = 'socket:~/.cmdproxy.sock'
-```
-
-Socket paths must be absolute. `~` and `$HOME` are expanded. Relative paths are rejected.
-
-### Server
-
-The server runs in socket mode with `--socket`. It reads a JSON request from stdin, evaluates policy, executes the command, and writes a JSON response to stdout. This is designed for systemd socket activation with `Accept=yes`, where each connection spawns a fresh server process.
-
-See [`examples/wl-paste/`](examples/wl-paste/) for a complete worked example with systemd units, SSH config, and shim/server configuration.
 
 ## Building
 
