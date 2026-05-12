@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -46,23 +47,42 @@ func main() {
 
 	switch target.Mode {
 	case config.TargetSocket:
-		runSocket(target.Addr, req)
+		runSocket(target.Addr, req, cfg.StdinEnabled(cmdName))
 	case config.TargetSSH:
 		runSSH(cfg, cmdName, target.Addr, req)
 	}
 }
 
-func runSocket(socketPath string, req protocol.Request) {
-	conn, err := net.Dial("unix", socketPath)
+func runSocket(socketPath string, req protocol.Request, stdinEnabled bool) {
+	addr, err := net.ResolveUnixAddr("unix", socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-shim: resolve %s: %v\n", socketPath, err)
+		os.Exit(127)
+	}
+	conn, err := net.DialUnix("unix", nil, addr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-shim: connect %s: %v\n", socketPath, err)
 		os.Exit(127)
 	}
 	defer conn.Close()
 
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
+	data, err := json.Marshal(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-shim: encode request: %v\n", err)
+		os.Exit(127)
+	}
+	if _, err := conn.Write(data); err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-shim: write request: %v\n", err)
 		os.Exit(127)
+	}
+
+	if stdinEnabled {
+		go func() {
+			io.Copy(conn, os.Stdin)
+			conn.CloseWrite()
+		}()
+	} else {
+		conn.CloseWrite()
 	}
 
 	var resp protocol.Response

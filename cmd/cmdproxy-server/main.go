@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,7 +88,8 @@ func runSocket() {
 	start := time.Now()
 
 	var req protocol.Request
-	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
+	dec := json.NewDecoder(os.Stdin)
+	if err := dec.Decode(&req); err != nil {
 		json.NewEncoder(os.Stdout).Encode(protocol.Response{
 			ExitCode: 126,
 			Error:    fmt.Sprintf("decode: %v", err),
@@ -140,8 +142,30 @@ func runSocket() {
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
 
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Error:    fmt.Sprintf("stdin pipe: %v", err),
+		})
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Error:    fmt.Sprintf("exec: %v", err),
+		})
+		return
+	}
+
+	go func() {
+		io.Copy(stdinPipe, io.MultiReader(dec.Buffered(), os.Stdin))
+		stdinPipe.Close()
+	}()
+
 	exitCode := 0
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
