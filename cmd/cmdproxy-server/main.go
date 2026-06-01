@@ -138,12 +138,38 @@ func runSocket() {
 	}
 
 	cmd := exec.Command(binPath, req.Args...)
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+
+	// Use *os.File pipes instead of bytes.Buffer so cmd.Wait() only
+	// waits for the process to exit, not for pipe I/O to finish.
+	// Commands that fork (like wl-copy) leave children holding the
+	// pipe fds, which would block Wait() forever with buffer-based I/O.
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Error:    fmt.Sprintf("stdout pipe: %v", err),
+		})
+		return
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Error:    fmt.Sprintf("stderr pipe: %v", err),
+		})
+		return
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
+		stderrR.Close()
+		stderrW.Close()
 		json.NewEncoder(os.Stdout).Encode(protocol.Response{
 			ExitCode: 126,
 			Error:    fmt.Sprintf("stdin pipe: %v", err),
@@ -152,6 +178,10 @@ func runSocket() {
 	}
 
 	if err := cmd.Start(); err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
+		stderrR.Close()
+		stderrW.Close()
 		json.NewEncoder(os.Stdout).Encode(protocol.Response{
 			ExitCode: 126,
 			Error:    fmt.Sprintf("exec: %v", err),
@@ -159,16 +189,29 @@ func runSocket() {
 		return
 	}
 
+	stdoutW.Close()
+	stderrW.Close()
+
 	go func() {
 		io.Copy(stdinPipe, io.MultiReader(dec.Buffered(), os.Stdin))
 		stdinPipe.Close()
 	}()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+	go func() { io.Copy(&stdoutBuf, stdoutR); close(stdoutDone) }()
+	go func() { io.Copy(&stderrBuf, stderrR); close(stderrDone) }()
 
 	exitCode := 0
 	if err := cmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
+			stdoutR.Close()
+			stderrR.Close()
+			<-stdoutDone
+			<-stderrDone
 			json.NewEncoder(os.Stdout).Encode(protocol.Response{
 				ExitCode: 126,
 				Stderr:   stderrBuf.Bytes(),
@@ -177,6 +220,13 @@ func runSocket() {
 			return
 		}
 	}
+
+	// Close read ends to unblock reader goroutines if a forked child
+	// still holds the write ends.
+	stdoutR.Close()
+	stderrR.Close()
+	<-stdoutDone
+	<-stderrDone
 
 	json.NewEncoder(os.Stdout).Encode(protocol.Response{
 		ExitCode: exitCode,

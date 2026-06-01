@@ -10,3 +10,4 @@ Type=oneshot
 StandardInput=socket
 StandardOutput=socket
 ExecStart=%h/.local/bin/cmdproxy-server --socket
+KillMode=process
