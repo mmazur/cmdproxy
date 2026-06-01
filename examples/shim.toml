@@ -13,6 +13,14 @@ target = "user@k8s-bastion.example.com"
 ssh_args = ["-p", "2222"]
 stdin = true   # allow stdin passthrough (e.g. for piping manifests)
 
+# Run these subcommands locally instead of proxying them
+run_local = [
+    "version",
+    "help *",
+    ["config", "*"],
+]
+# local_bin = "/usr/local/bin/kubectl"  # optional; if omitted, discover from PATH
+
 [command.az]
 # uses default target
 

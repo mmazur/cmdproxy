@@ -71,18 +71,25 @@ func parseRawConfig(raw rawServerConfig) (ServerConfig, error) {
 }
 
 func parseCommandConfig(raw rawServerCommandConfig) (ServerCommandConfig, error) {
-	allow, err := parseRules(raw.Allow, "allow")
+	allow, err := ParseRules(raw.Allow, "allow")
 	if err != nil {
 		return ServerCommandConfig{}, err
 	}
-	deny, err := parseRules(raw.Deny, "deny")
+	deny, err := ParseRules(raw.Deny, "deny")
 	if err != nil {
 		return ServerCommandConfig{}, err
 	}
 	return ServerCommandConfig{Allow: allow, Deny: deny}, nil
 }
 
-func parseRules(entries []any, label string) ([]Rule, error) {
+func MatchRule(rule Rule, args []string) bool {
+	if rule.LegacyGlob != "" {
+		return rule.Compiled.Match(strings.ToLower(strings.Join(args, " ")))
+	}
+	return argmatch.Match(rule.Segments, args)
+}
+
+func ParseRules(entries []any, label string) ([]Rule, error) {
 	var rules []Rule
 	for i, entry := range entries {
 		switch v := entry.(type) {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"github.com/mmazur/cmdproxy/internal/config"
 	"github.com/mmazur/cmdproxy/internal/protocol"
@@ -26,6 +27,10 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-shim: %v\n", err)
 		os.Exit(127)
+	}
+
+	if cfg.RunLocalMatch(cmdName, os.Args[1:]) {
+		runLocal(cfg, cmdName, os.Args[1:])
 	}
 
 	rawTarget := cfg.TargetForCommand(cmdName)
@@ -138,4 +143,17 @@ func resolveCommandName() string {
 		return filepath.Base(exe)
 	}
 	return filepath.Base(os.Args[0])
+}
+
+func runLocal(cfg config.ShimConfig, cmdName string, args []string) {
+	bin, err := cfg.LocalBinPath(cmdName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-shim: %v\n", err)
+		os.Exit(127)
+	}
+	argv := append([]string{cmdName}, args...)
+	if err := syscall.Exec(bin, argv, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-shim: exec %s: %v\n", bin, err)
+		os.Exit(127)
+	}
 }
