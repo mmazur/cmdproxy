@@ -52,13 +52,13 @@ func main() {
 
 	switch target.Mode {
 	case config.TargetSocket:
-		runSocket(target.Addr, req, cfg.StdinEnabled(cmdName))
+		runSocket(target.Addr, req)
 	case config.TargetSSH:
 		runSSH(cfg, cmdName, target.Addr, req)
 	}
 }
 
-func runSocket(socketPath string, req protocol.Request, stdinEnabled bool) {
+func runSocket(socketPath string, req protocol.Request) {
 	addr, err := net.ResolveUnixAddr("unix", socketPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-shim: resolve %s: %v\n", socketPath, err)
@@ -81,14 +81,10 @@ func runSocket(socketPath string, req protocol.Request, stdinEnabled bool) {
 		os.Exit(127)
 	}
 
-	if stdinEnabled {
-		go func() {
-			io.Copy(conn, os.Stdin)
-			conn.CloseWrite()
-		}()
-	} else {
+	go func() {
+		io.Copy(conn, os.Stdin)
 		conn.CloseWrite()
-	}
+	}()
 
 	var resp protocol.Response
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
@@ -115,9 +111,7 @@ func runSSH(cfg config.ShimConfig, cmdName, target string, req protocol.Request)
 	sshCmd := exec.Command("ssh", args...)
 	sshCmd.Stdout = os.Stdout
 	sshCmd.Stderr = os.Stderr
-	if cfg.StdinEnabled(cmdName) {
-		sshCmd.Stdin = os.Stdin
-	}
+	sshCmd.Stdin = os.Stdin
 
 	if err := sshCmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

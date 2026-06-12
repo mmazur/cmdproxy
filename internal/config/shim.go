@@ -13,7 +13,6 @@ import (
 type ShimCommandConfig struct {
 	Target   string   `toml:"target"`
 	SSHArgs  []string `toml:"ssh_args"`
-	Stdin    bool     `toml:"stdin"`
 	RunLocal []Rule   `toml:"-"`
 	LocalBin string   `toml:"local_bin"`
 }
@@ -27,7 +26,6 @@ type ShimConfig struct {
 type rawShimCommandConfig struct {
 	Target   string   `toml:"target"`
 	SSHArgs  []string `toml:"ssh_args"`
-	Stdin    bool     `toml:"stdin"`
 	RunLocal []any    `toml:"run_local"`
 	LocalBin string   `toml:"local_bin"`
 }
@@ -67,7 +65,6 @@ func parseRawShimConfig(raw rawShimConfig) (ShimConfig, error) {
 		cfg.Commands[cmd] = ShimCommandConfig{
 			Target:   rawCC.Target,
 			SSHArgs:  rawCC.SSHArgs,
-			Stdin:    rawCC.Stdin,
 			RunLocal: runLocal,
 			LocalBin: rawCC.LocalBin,
 		}
@@ -139,17 +136,10 @@ func (c *ShimConfig) SSHArgsForCommand(cmd string) []string {
 	return c.SSHArgs
 }
 
-func (c *ShimConfig) StdinEnabled(cmd string) bool {
-	if cc, ok := c.Commands[cmd]; ok {
-		return cc.Stdin
-	}
-	return false
-}
-
 type TargetMode int
 
 const (
-	TargetSSH    TargetMode = iota
+	TargetSSH TargetMode = iota
 	TargetSocket
 )
 

@@ -2,6 +2,7 @@
 # Install on: LOCAL desktop (your Wayland workstation)
 # Place at: ~/.config/cmdproxy/profiles/default.toml
 
+stdin = false
+
 [command.wl-paste]
 allow = ['*']
-

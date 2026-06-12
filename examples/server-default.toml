@@ -1,6 +1,10 @@
 # cmdproxy server profile configuration
 # Place at ~/.config/cmdproxy/profiles/default.toml
 
+# Default is true for compatibility. Set this to false to deny stdin by default,
+# then opt commands back in with command.<name>.stdin = true.
+stdin = true
+
 [command.az]
 allow = [
     "account show *",
@@ -23,3 +27,4 @@ deny = [
 
 [command.jq]
 allow = ["*"]   # allow all args
+stdin = true    # accepts stdin input

@@ -79,6 +79,22 @@ The server config defines per-command allow/deny patterns matched against argume
 
 All matching is case-insensitive.
 
+Stdin is controlled by server policy. For compatibility, stdin is allowed by default. Set top-level `stdin = false` in a server profile to deny stdin by default, then opt individual commands back in with `stdin = true`:
+
+```toml
+stdin = false
+
+[command.kubectl]
+allow = [['apply', '-f', '-']]
+stdin = true
+
+[command.az]
+allow = [['account', 'show']]
+# stdin remains false
+```
+
+The shim always forwards stdin when invoking the server. The server-side `stdin` policy is the enforcement point: in socket mode denied stdin is discarded, and in SSH mode denied stdin is replaced with `/dev/null` before the command is executed.
+
 ### Rule syntax
 
 Both `allow` and `deny` lists support two formats that can be mixed freely:

@@ -37,11 +37,18 @@ deny = [
 	if len(az.Allow) != 3 {
 		t.Fatalf("allow: got %d rules, want 3", len(az.Allow))
 	}
+	if !cfg.Stdin {
+		t.Error("global stdin default = false, want true")
+	}
+	if !az.Stdin {
+		t.Error("command stdin = false, want true from default")
+	}
 
 	// First: segment rule
 	if az.Allow[0].Segments == nil {
 		t.Error("allow[0]: expected segment rule, got glob")
 	}
+
 	if len(az.Allow[0].Segments) != 3 {
 		t.Errorf("allow[0]: got %d segments, want 3", len(az.Allow[0].Segments))
 	}
@@ -68,6 +75,38 @@ deny = [
 	// Second deny: segment rule
 	if az.Deny[1].Segments == nil {
 		t.Error("deny[1]: expected segment rule, got glob")
+	}
+}
+
+func TestParseRawConfig_StdinDefaultAndOverride(t *testing.T) {
+	input := `
+stdin = false
+
+[command.az]
+allow = ["*"]
+
+[command.kubectl]
+allow = ["*"]
+stdin = true
+`
+	var raw rawServerConfig
+	if _, err := toml.Decode(input, &raw); err != nil {
+		t.Fatalf("toml.Decode error: %v", err)
+	}
+
+	cfg, err := parseRawConfig(raw)
+	if err != nil {
+		t.Fatalf("parseRawConfig error: %v", err)
+	}
+
+	if cfg.Stdin {
+		t.Error("global stdin default = true, want false")
+	}
+	if cfg.Commands["az"].Stdin {
+		t.Error("az stdin = true, want false from global default")
+	}
+	if !cfg.Commands["kubectl"].Stdin {
+		t.Error("kubectl stdin = false, want true from command override")
 	}
 }
 

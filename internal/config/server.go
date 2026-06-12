@@ -23,9 +23,11 @@ type Rule struct {
 type ServerCommandConfig struct {
 	Allow []Rule `toml:"-"`
 	Deny  []Rule `toml:"-"`
+	Stdin bool   `toml:"-"`
 }
 
 type ServerConfig struct {
+	Stdin    bool                           `toml:"-"`
 	Commands map[string]ServerCommandConfig `toml:"command"`
 }
 
@@ -33,9 +35,11 @@ type ServerConfig struct {
 type rawServerCommandConfig struct {
 	Allow []any `toml:"allow"`
 	Deny  []any `toml:"deny"`
+	Stdin *bool `toml:"stdin"`
 }
 
 type rawServerConfig struct {
+	Stdin    *bool                             `toml:"stdin"`
 	Commands map[string]rawServerCommandConfig `toml:"command"`
 }
 
@@ -55,12 +59,18 @@ func LoadServerConfig(profileName string) (ServerConfig, error) {
 }
 
 func parseRawConfig(raw rawServerConfig) (ServerConfig, error) {
+	stdinDefault := true
+	if raw.Stdin != nil {
+		stdinDefault = *raw.Stdin
+	}
+
 	cfg := ServerConfig{
+		Stdin:    stdinDefault,
 		Commands: make(map[string]ServerCommandConfig, len(raw.Commands)),
 	}
 
 	for cmd, rawCC := range raw.Commands {
-		cc, err := parseCommandConfig(rawCC)
+		cc, err := parseCommandConfig(rawCC, stdinDefault)
 		if err != nil {
 			return ServerConfig{}, fmt.Errorf("command %q: %w", cmd, err)
 		}
@@ -70,7 +80,7 @@ func parseRawConfig(raw rawServerConfig) (ServerConfig, error) {
 	return cfg, nil
 }
 
-func parseCommandConfig(raw rawServerCommandConfig) (ServerCommandConfig, error) {
+func parseCommandConfig(raw rawServerCommandConfig, stdinDefault bool) (ServerCommandConfig, error) {
 	allow, err := ParseRules(raw.Allow, "allow")
 	if err != nil {
 		return ServerCommandConfig{}, err
@@ -79,7 +89,11 @@ func parseCommandConfig(raw rawServerCommandConfig) (ServerCommandConfig, error)
 	if err != nil {
 		return ServerCommandConfig{}, err
 	}
-	return ServerCommandConfig{Allow: allow, Deny: deny}, nil
+	stdin := stdinDefault
+	if raw.Stdin != nil {
+		stdin = *raw.Stdin
+	}
+	return ServerCommandConfig{Allow: allow, Deny: deny, Stdin: stdin}, nil
 }
 
 func MatchRule(rule Rule, args []string) bool {

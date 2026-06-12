@@ -55,6 +55,7 @@ func runSSH() {
 	}
 
 	decision := policy.Evaluate(cfg, req.Cmd, req.Args)
+	commandConfig := cfg.Commands[req.Cmd]
 
 	writeLog(logEntry{
 		Timestamp:  start.UTC().Format(time.RFC3339),
@@ -78,6 +79,9 @@ func runSSH() {
 	}
 
 	argv := append([]string{req.Cmd}, req.Args...)
+	if !commandConfig.Stdin {
+		replaceStdinWithDevNull()
+	}
 	if err := syscall.Exec(binPath, argv, os.Environ()); err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-server: exec: %v\n", err)
 		os.Exit(126)
@@ -107,6 +111,7 @@ func runSocket() {
 	}
 
 	decision := policy.Evaluate(cfg, req.Cmd, req.Args)
+	commandConfig := cfg.Commands[req.Cmd]
 
 	writeLog(logEntry{
 		Timestamp:  start.UTC().Format(time.RFC3339),
@@ -164,17 +169,20 @@ func runSocket() {
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 
-	stdinPipe, err := cmd.StdinPipe()
-	if err != nil {
-		stdoutR.Close()
-		stdoutW.Close()
-		stderrR.Close()
-		stderrW.Close()
-		json.NewEncoder(os.Stdout).Encode(protocol.Response{
-			ExitCode: 126,
-			Error:    fmt.Sprintf("stdin pipe: %v", err),
-		})
-		return
+	var stdinPipe io.WriteCloser
+	if commandConfig.Stdin {
+		stdinPipe, err = cmd.StdinPipe()
+		if err != nil {
+			stdoutR.Close()
+			stdoutW.Close()
+			stderrR.Close()
+			stderrW.Close()
+			json.NewEncoder(os.Stdout).Encode(protocol.Response{
+				ExitCode: 126,
+				Error:    fmt.Sprintf("stdin pipe: %v", err),
+			})
+			return
+		}
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -192,10 +200,14 @@ func runSocket() {
 	stdoutW.Close()
 	stderrW.Close()
 
-	go func() {
-		io.Copy(stdinPipe, io.MultiReader(dec.Buffered(), os.Stdin))
-		stdinPipe.Close()
-	}()
+	if commandConfig.Stdin {
+		go func() {
+			io.Copy(stdinPipe, io.MultiReader(dec.Buffered(), os.Stdin))
+			stdinPipe.Close()
+		}()
+	} else {
+		go io.Copy(io.Discard, io.MultiReader(dec.Buffered(), os.Stdin))
+	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	stdoutDone := make(chan struct{})
@@ -233,6 +245,20 @@ func runSocket() {
 		Stdout:   stdoutBuf.Bytes(),
 		Stderr:   stderrBuf.Bytes(),
 	})
+}
+
+func replaceStdinWithDevNull() {
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-server: open %s: %v\n", os.DevNull, err)
+		os.Exit(126)
+	}
+	defer devNull.Close()
+
+	if err := syscall.Dup2(int(devNull.Fd()), int(os.Stdin.Fd())); err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-server: dup stdin: %v\n", err)
+		os.Exit(126)
+	}
 }
 
 func writeLog(entry logEntry) {
