@@ -10,8 +10,18 @@ import (
 )
 
 type Request struct {
-	Cmd  string   `json:"cmd"`
-	Args []string `json:"args"`
+	Cmd          string       `json:"cmd"`
+	Args         []string     `json:"args"`
+	BundleFormat string       `json:"bundle_format,omitempty"`
+	BundleSize   int64        `json:"bundle_size,omitempty"`
+	Uploads      []UploadMeta `json:"uploads,omitempty"`
+}
+
+type UploadMeta struct {
+	ArgIndex     int    `json:"arg_index"`
+	OriginalPath string `json:"original_path"`
+	StagedPath   string `json:"staged_path,omitempty"`
+	Missing      bool   `json:"missing,omitempty"`
 }
 
 type Response struct {

@@ -43,6 +43,9 @@ deny = [
 	if !az.Stdin {
 		t.Error("command stdin = false, want true from default")
 	}
+	if az.AllowFileTransfer {
+		t.Error("allow_file_transfer = true, want false by default")
+	}
 
 	// First: segment rule
 	if az.Allow[0].Segments == nil {
@@ -75,6 +78,27 @@ deny = [
 	// Second deny: segment rule
 	if az.Deny[1].Segments == nil {
 		t.Error("deny[1]: expected segment rule, got glob")
+	}
+}
+
+func TestParseRawConfigAllowFileTransfer(t *testing.T) {
+	input := `
+[command.gws]
+allow = [["drive", "files", "create", "*:*"]]
+allow_file_transfer = true
+`
+	var raw rawServerConfig
+	if _, err := toml.Decode(input, &raw); err != nil {
+		t.Fatalf("toml.Decode error: %v", err)
+	}
+
+	cfg, err := parseRawConfig(raw)
+	if err != nil {
+		t.Fatalf("parseRawConfig error: %v", err)
+	}
+
+	if !cfg.Commands["gws"].AllowFileTransfer {
+		t.Error("allow_file_transfer = false, want true")
 	}
 }
 

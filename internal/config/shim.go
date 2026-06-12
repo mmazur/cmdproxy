@@ -8,13 +8,21 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/mmazur/cmdproxy/internal/policy/argmatch"
 )
+
+type UploadRule struct {
+	Match    []argmatch.Segment
+	FileArgs []string
+}
 
 type ShimCommandConfig struct {
 	Target   string   `toml:"target"`
 	SSHArgs  []string `toml:"ssh_args"`
 	RunLocal []Rule   `toml:"-"`
 	LocalBin string   `toml:"local_bin"`
+	Upload   []UploadRule
 }
 
 type ShimConfig struct {
@@ -28,6 +36,10 @@ type rawShimCommandConfig struct {
 	SSHArgs  []string `toml:"ssh_args"`
 	RunLocal []any    `toml:"run_local"`
 	LocalBin string   `toml:"local_bin"`
+	Upload   []struct {
+		Match    []string `toml:"match"`
+		FileArgs []string `toml:"file_args"`
+	} `toml:"upload"`
 }
 
 type rawShimConfig struct {
@@ -62,11 +74,29 @@ func parseRawShimConfig(raw rawShimConfig) (ShimConfig, error) {
 		if err != nil {
 			return ShimConfig{}, err
 		}
+		upload := make([]UploadRule, 0, len(rawCC.Upload))
+		for i, rawUpload := range rawCC.Upload {
+			if len(rawUpload.Match) == 0 {
+				return ShimConfig{}, fmt.Errorf("command.%s.upload[%d]: match is required", cmd, i)
+			}
+			if len(rawUpload.FileArgs) == 0 {
+				return ShimConfig{}, fmt.Errorf("command.%s.upload[%d]: file_args is required", cmd, i)
+			}
+			match, err := argmatch.ParseSegments(rawUpload.Match)
+			if err != nil {
+				return ShimConfig{}, fmt.Errorf("command.%s.upload[%d].match: %w", cmd, i, err)
+			}
+			upload = append(upload, UploadRule{
+				Match:    match,
+				FileArgs: rawUpload.FileArgs,
+			})
+		}
 		cfg.Commands[cmd] = ShimCommandConfig{
 			Target:   rawCC.Target,
 			SSHArgs:  rawCC.SSHArgs,
 			RunLocal: runLocal,
 			LocalBin: rawCC.LocalBin,
+			Upload:   upload,
 		}
 	}
 
@@ -134,6 +164,13 @@ func (c *ShimConfig) SSHArgsForCommand(cmd string) []string {
 		return cc.SSHArgs
 	}
 	return c.SSHArgs
+}
+
+func (c *ShimConfig) UploadRulesForCommand(cmd string) []UploadRule {
+	if cc, ok := c.Commands[cmd]; ok {
+		return cc.Upload
+	}
+	return nil
 }
 
 type TargetMode int

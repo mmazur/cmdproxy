@@ -18,12 +18,13 @@ allow = [
     "get *",
     "describe *",
     "logs *",
+    ["apply", "*:*"],
 ]
 deny = [
     "delete *",
-    "apply *",
     "edit *",
 ]
+allow_file_transfer = true
 
 [command.jq]
 allow = ["*"]   # allow all args

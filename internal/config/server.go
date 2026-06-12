@@ -21,9 +21,10 @@ type Rule struct {
 }
 
 type ServerCommandConfig struct {
-	Allow []Rule `toml:"-"`
-	Deny  []Rule `toml:"-"`
-	Stdin bool   `toml:"-"`
+	Allow             []Rule `toml:"-"`
+	Deny              []Rule `toml:"-"`
+	Stdin             bool   `toml:"-"`
+	AllowFileTransfer bool   `toml:"allow_file_transfer"`
 }
 
 type ServerConfig struct {
@@ -33,9 +34,10 @@ type ServerConfig struct {
 
 // raw types for TOML decoding before validation
 type rawServerCommandConfig struct {
-	Allow []any `toml:"allow"`
-	Deny  []any `toml:"deny"`
-	Stdin *bool `toml:"stdin"`
+	Allow             []any `toml:"allow"`
+	Deny              []any `toml:"deny"`
+	Stdin             *bool `toml:"stdin"`
+	AllowFileTransfer bool  `toml:"allow_file_transfer"`
 }
 
 type rawServerConfig struct {
@@ -93,7 +95,12 @@ func parseCommandConfig(raw rawServerCommandConfig, stdinDefault bool) (ServerCo
 	if raw.Stdin != nil {
 		stdin = *raw.Stdin
 	}
-	return ServerCommandConfig{Allow: allow, Deny: deny, Stdin: stdin}, nil
+	return ServerCommandConfig{
+		Allow:             allow,
+		Deny:              deny,
+		Stdin:             stdin,
+		AllowFileTransfer: raw.AllowFileTransfer,
+	}, nil
 }
 
 func MatchRule(rule Rule, args []string) bool {

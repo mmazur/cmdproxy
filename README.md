@@ -95,6 +95,27 @@ allow = [['account', 'show']]
 
 The shim always forwards stdin when invoking the server. The server-side `stdin` policy is the enforcement point: in socket mode denied stdin is discarded, and in SSH mode denied stdin is replaced with `/dev/null` before the command is executed.
 
+File transfer is controlled separately from command stdin. The shim can be configured to package file or directory arguments into a tar.gz bundle before command stdin; the server extracts the bundle into a temporary working directory before running the command. Commands must opt in server-side with `allow_file_transfer = true` or any request carrying upload metadata is rejected.
+
+```toml
+# shim.toml
+[command.kubectl]
+target = 'user@server'
+
+[[command.kubectl.upload]]
+match = ['apply', '*:*']
+file_args = ['-f', '--filename']
+```
+
+```toml
+# profiles/default.toml
+[command.kubectl]
+allow = [['apply', '*:*']]
+allow_file_transfer = true
+```
+
+Relative upload paths keep their original argv value and work because the command runs from the temporary workspace. Absolute upload paths are rewritten to a visible staged path such as `./.cmdproxy-upload/0/file.yaml`. If a configured file argument points to a missing local path, the shim sends upload metadata without file bytes; the server still runs from an empty temporary workspace so the command fails with its normal “file not found” behavior. Upload bundles are validated during extraction and cannot write outside the temporary workspace.
+
 ### Rule syntax
 
 Both `allow` and `deny` lists support two formats that can be mixed freely:

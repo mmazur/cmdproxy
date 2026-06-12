@@ -25,6 +25,20 @@ func TestRoundtrip(t *testing.T) {
 			name: "args with spaces and special chars",
 			req:  Request{Cmd: "jq", Args: []string{".data[] | select(.name == \"foo\")", "input.json"}},
 		},
+		{
+			name: "upload metadata",
+			req: Request{
+				Cmd:          "gws",
+				Args:         []string{"drive", "files", "create", "--upload", "./doc.md"},
+				BundleFormat: "tar.gz",
+				BundleSize:   123,
+				Uploads: []UploadMeta{{
+					ArgIndex:     4,
+					OriginalPath: "./doc.md",
+					StagedPath:   "./doc.md",
+				}},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -50,6 +64,20 @@ func TestRoundtrip(t *testing.T) {
 					t.Errorf("Args[%d] = %q, want %q", i, decoded.Args[i], tt.req.Args[i])
 				}
 			}
+			if decoded.BundleFormat != tt.req.BundleFormat {
+				t.Errorf("BundleFormat = %q, want %q", decoded.BundleFormat, tt.req.BundleFormat)
+			}
+			if decoded.BundleSize != tt.req.BundleSize {
+				t.Errorf("BundleSize = %d, want %d", decoded.BundleSize, tt.req.BundleSize)
+			}
+			if len(decoded.Uploads) != len(tt.req.Uploads) {
+				t.Fatalf("len(Uploads) = %d, want %d", len(decoded.Uploads), len(tt.req.Uploads))
+			}
+			for i := range decoded.Uploads {
+				if decoded.Uploads[i] != tt.req.Uploads[i] {
+					t.Errorf("Uploads[%d] = %#v, want %#v", i, decoded.Uploads[i], tt.req.Uploads[i])
+				}
+			}
 		})
 	}
 }
@@ -60,7 +88,7 @@ func TestDecodeInvalid(t *testing.T) {
 		input string
 	}{
 		{"not base64", "!!!not-base64!!!"},
-		{"not gzip", "aGVsbG8="},                     // base64("hello")
+		{"not gzip", "aGVsbG8="}, // base64("hello")
 		{"empty", ""},
 	}
 

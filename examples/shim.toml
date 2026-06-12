@@ -20,6 +20,12 @@ run_local = [
 ]
 # local_bin = "/usr/local/bin/kubectl"  # optional; if omitted, discover from PATH
 
+# Upload local files/directories referenced by specific args for selected subcommands.
+# Relative paths are preserved; absolute paths are rewritten to ./.cmdproxy-upload/...
+[[command.kubectl.upload]]
+match = ["apply", "*:*"]
+file_args = ["-f", "--filename"]
+
 [command.az]
 # uses default target
 

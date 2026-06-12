@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/mmazur/cmdproxy/internal/config"
+	"github.com/mmazur/cmdproxy/internal/filetransfer"
 	"github.com/mmazur/cmdproxy/internal/protocol"
 )
 
@@ -45,20 +46,22 @@ func main() {
 		os.Exit(127)
 	}
 
-	req := protocol.Request{
-		Cmd:  cmdName,
-		Args: os.Args[1:],
+	bundle, err := filetransfer.BuildRequest(cmdName, os.Args[1:], cfg.UploadRulesForCommand(cmdName))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-shim: upload: %v\n", err)
+		os.Exit(127)
 	}
+	req := bundle.Request
 
 	switch target.Mode {
 	case config.TargetSocket:
-		runSocket(target.Addr, req)
+		runSocket(target.Addr, req, bundle.Data)
 	case config.TargetSSH:
-		runSSH(cfg, cmdName, target.Addr, req)
+		runSSH(cfg, cmdName, target.Addr, req, bundle.Data)
 	}
 }
 
-func runSocket(socketPath string, req protocol.Request) {
+func runSocket(socketPath string, req protocol.Request, bundle []byte) {
 	addr, err := net.ResolveUnixAddr("unix", socketPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-shim: resolve %s: %v\n", socketPath, err)
@@ -82,6 +85,9 @@ func runSocket(socketPath string, req protocol.Request) {
 	}
 
 	go func() {
+		if len(bundle) > 0 {
+			conn.Write(bundle)
+		}
 		io.Copy(conn, os.Stdin)
 		conn.CloseWrite()
 	}()
@@ -100,7 +106,7 @@ func runSocket(socketPath string, req protocol.Request) {
 	os.Exit(resp.ExitCode)
 }
 
-func runSSH(cfg config.ShimConfig, cmdName, target string, req protocol.Request) {
+func runSSH(cfg config.ShimConfig, cmdName, target string, req protocol.Request, bundle []byte) {
 	encoded, err := protocol.Encode(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-shim: encode: %v\n", err)
@@ -111,7 +117,20 @@ func runSSH(cfg config.ShimConfig, cmdName, target string, req protocol.Request)
 	sshCmd := exec.Command("ssh", args...)
 	sshCmd.Stdout = os.Stdout
 	sshCmd.Stderr = os.Stderr
-	sshCmd.Stdin = os.Stdin
+	if len(bundle) == 0 {
+		sshCmd.Stdin = os.Stdin
+	} else {
+		stdinPipe, err := sshCmd.StdinPipe()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cmdproxy-shim: ssh stdin: %v\n", err)
+			os.Exit(127)
+		}
+		go func() {
+			stdinPipe.Write(bundle)
+			io.Copy(stdinPipe, os.Stdin)
+			stdinPipe.Close()
+		}()
+	}
 
 	if err := sshCmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

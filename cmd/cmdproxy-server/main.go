@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mmazur/cmdproxy/internal/config"
+	"github.com/mmazur/cmdproxy/internal/filetransfer"
 	"github.com/mmazur/cmdproxy/internal/policy"
 	"github.com/mmazur/cmdproxy/internal/protocol"
 )
@@ -71,6 +72,14 @@ func runSSH() {
 		fmt.Fprintf(os.Stderr, "cmdproxy: denied: %s\nHint: you need allow running this command on %s@%s system\n", decision.Reason, os.Getenv("USER"), host)
 		os.Exit(126)
 	}
+	workDir, cleanup, err := prepareUpload(req, commandConfig, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmdproxy-server: upload: %v\n", err)
+		os.Exit(126)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 
 	binPath, err := exec.LookPath(req.Cmd)
 	if err != nil {
@@ -79,6 +88,12 @@ func runSSH() {
 	}
 
 	argv := append([]string{req.Cmd}, req.Args...)
+	if workDir != "" {
+		if err := os.Chdir(workDir); err != nil {
+			fmt.Fprintf(os.Stderr, "cmdproxy-server: chdir upload workspace: %v\n", err)
+			os.Exit(126)
+		}
+	}
 	if !commandConfig.Stdin {
 		replaceStdinWithDevNull()
 	}
@@ -132,6 +147,18 @@ func runSocket() {
 		})
 		return
 	}
+	stream := io.MultiReader(dec.Buffered(), os.Stdin)
+	workDir, cleanup, err := prepareUpload(req, commandConfig, stream)
+	if err != nil {
+		json.NewEncoder(os.Stdout).Encode(protocol.Response{
+			ExitCode: 126,
+			Error:    fmt.Sprintf("upload: %v", err),
+		})
+		return
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 
 	binPath, err := exec.LookPath(req.Cmd)
 	if err != nil {
@@ -143,6 +170,9 @@ func runSocket() {
 	}
 
 	cmd := exec.Command(binPath, req.Args...)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
 
 	// Use *os.File pipes instead of bytes.Buffer so cmd.Wait() only
 	// waits for the process to exit, not for pipe I/O to finish.
@@ -202,11 +232,11 @@ func runSocket() {
 
 	if commandConfig.Stdin {
 		go func() {
-			io.Copy(stdinPipe, io.MultiReader(dec.Buffered(), os.Stdin))
+			io.Copy(stdinPipe, stream)
 			stdinPipe.Close()
 		}()
 	} else {
-		go io.Copy(io.Discard, io.MultiReader(dec.Buffered(), os.Stdin))
+		go io.Copy(io.Discard, stream)
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -245,6 +275,46 @@ func runSocket() {
 		Stdout:   stdoutBuf.Bytes(),
 		Stderr:   stderrBuf.Bytes(),
 	})
+}
+
+func prepareUpload(req protocol.Request, commandConfig config.ServerCommandConfig, stream io.Reader) (string, func(), error) {
+	hasUploadMetadata := req.BundleSize > 0 || len(req.Uploads) > 0
+	if !hasUploadMetadata {
+		return "", nil, nil
+	}
+	if !commandConfig.AllowFileTransfer {
+		return "", nil, fmt.Errorf("file transfer is not allowed for command %q", req.Cmd)
+	}
+	if req.BundleFormat != "" && req.BundleFormat != filetransfer.BundleFormatTarGz {
+		return "", nil, fmt.Errorf("unsupported bundle format %q", req.BundleFormat)
+	}
+	if req.BundleSize < 0 {
+		return "", nil, fmt.Errorf("invalid bundle size %d", req.BundleSize)
+	}
+
+	workDir, err := os.MkdirTemp("", "cmdproxy-upload-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create upload workspace: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(workDir) }
+
+	if req.BundleSize == 0 {
+		return workDir, cleanup, nil
+	}
+	if req.BundleFormat == "" {
+		cleanup()
+		return "", nil, fmt.Errorf("bundle format is required when bundle size is non-zero")
+	}
+	limited := &io.LimitedReader{R: stream, N: req.BundleSize}
+	if err := filetransfer.Extract(limited, workDir); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if _, err := io.Copy(io.Discard, limited); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("consume upload bundle: %w", err)
+	}
+	return workDir, cleanup, nil
 }
 
 func replaceStdinWithDevNull() {

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestParseTarget(t *testing.T) {
@@ -74,6 +76,37 @@ func TestParseTarget(t *testing.T) {
 				t.Errorf("addr = %q, want %q", target.Addr, tt.addr)
 			}
 		})
+	}
+}
+
+func TestParseRawShimConfigUploadRules(t *testing.T) {
+	input := `
+[command.gws]
+target = "socket:/tmp/cmdproxy.sock"
+
+[[command.gws.upload]]
+match = ["drive", "files", "create", "*:*"]
+file_args = ["--upload", "-u"]
+`
+	var raw rawShimConfig
+	if _, err := toml.Decode(input, &raw); err != nil {
+		t.Fatalf("toml.Decode error: %v", err)
+	}
+
+	cfg, err := parseRawShimConfig(raw)
+	if err != nil {
+		t.Fatalf("parseRawShimConfig error: %v", err)
+	}
+
+	rules := cfg.UploadRulesForCommand("gws")
+	if len(rules) != 1 {
+		t.Fatalf("upload rules = %d, want 1", len(rules))
+	}
+	if len(rules[0].Match) != 4 {
+		t.Errorf("match segments = %d, want 4", len(rules[0].Match))
+	}
+	if len(rules[0].FileArgs) != 2 || rules[0].FileArgs[0] != "--upload" || rules[0].FileArgs[1] != "-u" {
+		t.Errorf("file args = %#v, want --upload and -u", rules[0].FileArgs)
 	}
 }
 
