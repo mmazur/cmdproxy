@@ -46,7 +46,7 @@ func main() {
 		os.Exit(127)
 	}
 
-	bundle, err := filetransfer.BuildRequest(cmdName, os.Args[1:], cfg.UploadRulesForCommand(cmdName))
+	bundle, err := filetransfer.BuildRequest(cfg.RemoteCommandForCommand(cmdName), os.Args[1:], cfg.UploadRulesForCommand(cmdName))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmdproxy-shim: upload: %v\n", err)
 		os.Exit(127)

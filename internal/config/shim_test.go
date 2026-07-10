@@ -110,6 +110,35 @@ file_args = ["--upload", "-u"]
 	}
 }
 
+func TestRemoteCommandForCommand(t *testing.T) {
+	input := `
+[command.kubectl-prod]
+target = "user@server"
+command = "kubectl"
+
+[command.kubectl]
+target = "user@server"
+`
+	var raw rawShimConfig
+	if _, err := toml.Decode(input, &raw); err != nil {
+		t.Fatalf("toml.Decode error: %v", err)
+	}
+	cfg, err := parseRawShimConfig(raw)
+	if err != nil {
+		t.Fatalf("parseRawShimConfig error: %v", err)
+	}
+
+	if got := cfg.RemoteCommandForCommand("kubectl-prod"); got != "kubectl" {
+		t.Errorf("RemoteCommandForCommand(kubectl-prod) = %q, want kubectl", got)
+	}
+	if got := cfg.RemoteCommandForCommand("kubectl"); got != "kubectl" {
+		t.Errorf("RemoteCommandForCommand(kubectl) = %q, want kubectl", got)
+	}
+	if got := cfg.RemoteCommandForCommand("unknown"); got != "unknown" {
+		t.Errorf("RemoteCommandForCommand(unknown) = %q, want unknown", got)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
 }

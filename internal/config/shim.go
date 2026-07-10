@@ -22,6 +22,7 @@ type ShimCommandConfig struct {
 	SSHArgs  []string `toml:"ssh_args"`
 	RunLocal []Rule   `toml:"-"`
 	LocalBin string   `toml:"local_bin"`
+	Command  string   `toml:"command"`
 	Upload   []UploadRule
 }
 
@@ -36,6 +37,7 @@ type rawShimCommandConfig struct {
 	SSHArgs  []string `toml:"ssh_args"`
 	RunLocal []any    `toml:"run_local"`
 	LocalBin string   `toml:"local_bin"`
+	Command  string   `toml:"command"`
 	Upload   []struct {
 		Match    []string `toml:"match"`
 		FileArgs []string `toml:"file_args"`
@@ -96,6 +98,7 @@ func parseRawShimConfig(raw rawShimConfig) (ShimConfig, error) {
 			SSHArgs:  rawCC.SSHArgs,
 			RunLocal: runLocal,
 			LocalBin: rawCC.LocalBin,
+			Command:  rawCC.Command,
 			Upload:   upload,
 		}
 	}
@@ -171,6 +174,17 @@ func (c *ShimConfig) UploadRulesForCommand(cmd string) []UploadRule {
 		return cc.Upload
 	}
 	return nil
+}
+
+// RemoteCommandForCommand returns the command name to send to the server for a
+// given local command name. If a `command` override is configured (e.g. a
+// symlink named "kubectl-prod" that should run "kubectl" on the server), it is
+// used; otherwise the local name is sent unchanged.
+func (c *ShimConfig) RemoteCommandForCommand(cmd string) string {
+	if cc, ok := c.Commands[cmd]; ok && cc.Command != "" {
+		return cc.Command
+	}
+	return cmd
 }
 
 type TargetMode int

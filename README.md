@@ -38,6 +38,18 @@ The server runs as an SSH forced command. Configure the shim target as an SSH de
 target = 'user@server'
 ```
 
+### Command aliasing
+
+The config key is the local command name (the shim's symlink name). By default that same name is sent to the server. Set `command` to send a different name — for example, symlink the shim as `kubectl-prod` locally but run `kubectl` on the server. This lets two symlinks share one server-side command while each keeps its own target and policy:
+
+```toml
+[command.kubectl-prod]
+target = 'user@server'
+command = 'kubectl'
+```
+
+Local lookups (target, ssh_args, run_local, local_bin, upload) still key off the symlink name (`kubectl-prod`); only the command executed and policy-matched server-side becomes `kubectl`.
+
 ### Unix socket
 
 Forward commands back to your local machine over an existing SSH connection, without opening a reverse SSH server. Useful for clipboard access, local tool execution, or any case where the tool must run on the desktop side.
