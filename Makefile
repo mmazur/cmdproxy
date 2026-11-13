@@ -1,9 +1,10 @@
 BINDIR ?= ~/.local/bin
 CMDS := cmdproxy-shim cmdproxy-server
+SRCS := $(shell find cmd internal -name '*.go') go.mod go.sum
 
 all: $(CMDS)
 
-cmdproxy-%: cmd/cmdproxy-%/main.go
+cmdproxy-%: $(SRCS)
 	go build -o $@ ./cmd/$@
 
 install: all
