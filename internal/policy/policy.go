@@ -36,6 +36,8 @@ func Evaluate(cfg config.ServerConfig, cmd string, args []string) Decision {
 			reason := "args matched deny pattern"
 			if rule.LegacyGlob != "" {
 				reason = fmt.Sprintf("args matched deny pattern %q", rule.LegacyGlob)
+			} else if rule.Named != nil {
+				reason = "args matched named-option deny rule"
 			}
 			return Decision{Deny, reason}
 		}
@@ -46,6 +48,8 @@ func Evaluate(cfg config.ServerConfig, cmd string, args []string) Decision {
 			reason := "args matched positional allow rule"
 			if rule.LegacyGlob != "" {
 				reason = fmt.Sprintf("args matched allow pattern %q", rule.LegacyGlob)
+			} else if rule.Named != nil {
+				reason = "args matched named-option allow rule"
 			}
 			return Decision{Allow, reason}
 		}

@@ -16,15 +16,19 @@ type Quantifier struct {
 
 // Segment is a single parsed element from a positional pattern list.
 type Segment struct {
-	GlobPattern string     // the glob pattern (with escaped colons resolved)
-	Quantifier  Quantifier // how many args this segment can consume
-	compiled    glob.Glob  // pre-compiled glob
+	GlobPattern   string     // the glob pattern (with escaped colons resolved)
+	Quantifier    Quantifier // how many args this segment can consume
+	compiled      glob.Glob  // pre-compiled glob
+	caseSensitive bool
 }
 
 // Match tests whether a single argument matches this segment's glob.
-// Matching is case-insensitive.
+// Legacy segments match case-insensitively; structured-rule segments do not.
 func (s *Segment) Match(arg string) bool {
-	return s.compiled.Match(strings.ToLower(arg))
+	if !s.caseSensitive {
+		arg = strings.ToLower(arg)
+	}
+	return s.compiled.Match(arg)
 }
 
 // ParseSegment parses a raw segment string like "pattern:quantifier".
@@ -37,6 +41,10 @@ func (s *Segment) Match(arg string) bool {
 //   - Empty glob is a syntax error
 //   - Quantifier must be one of: * + ? N N+ N-M
 func ParseSegment(raw string) (Segment, error) {
+	return parseSegment(raw, false)
+}
+
+func parseSegment(raw string, caseSensitive bool) (Segment, error) {
 	globPart, quantStr, hasColon, err := splitSegment(raw)
 	if err != nil {
 		return Segment{}, err
@@ -58,23 +66,37 @@ func ParseSegment(raw string) (Segment, error) {
 		return Segment{}, fmt.Errorf("in segment %q: %w", raw, err)
 	}
 
-	compiled, err := glob.Compile(strings.ToLower(globPart))
+	pattern := globPart
+	if !caseSensitive {
+		pattern = strings.ToLower(pattern)
+	}
+	compiled, err := glob.Compile(pattern)
 	if err != nil {
 		return Segment{}, fmt.Errorf("in segment %q: bad glob %q: %w", raw, globPart, err)
 	}
 
 	return Segment{
-		GlobPattern: globPart,
-		Quantifier:  q,
-		compiled:    compiled,
+		GlobPattern:   globPart,
+		Quantifier:    q,
+		compiled:      compiled,
+		caseSensitive: caseSensitive,
 	}, nil
 }
 
 // ParseSegments parses a full positional pattern list.
 func ParseSegments(patterns []string) ([]Segment, error) {
+	return parseSegments(patterns, false)
+}
+
+// ParseCaseSensitiveSegments uses the positional grammar without case folding.
+func ParseCaseSensitiveSegments(patterns []string) ([]Segment, error) {
+	return parseSegments(patterns, true)
+}
+
+func parseSegments(patterns []string, caseSensitive bool) ([]Segment, error) {
 	segments := make([]Segment, 0, len(patterns))
 	for i, p := range patterns {
-		seg, err := ParseSegment(p)
+		seg, err := parseSegment(p, caseSensitive)
 		if err != nil {
 			return nil, fmt.Errorf("segment [%d]: %w", i, err)
 		}

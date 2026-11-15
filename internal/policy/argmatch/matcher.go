@@ -1,7 +1,7 @@
 package argmatch
 
 // Match tests whether args matches the positional segment pattern.
-// Each segment consumes one or more args according to its quantifier.
+// Each segment consumes args according to its quantifier.
 // All args must be consumed for a match.
 func Match(segments []Segment, args []string) bool {
 	return matchAt(segments, 0, args, 0)
@@ -21,8 +21,8 @@ func matchAt(segments []Segment, segIdx int, args []string, argIdx int) bool {
 		max = remaining
 	}
 
-	// Try consuming count args for this segment, from min to max.
-	for count := seg.Quantifier.Min; count <= max; count++ {
+	// Validate every consumed argument, including those below the minimum count.
+	for count := 0; count <= max; count++ {
 		// Check that all count args match the segment's glob.
 		if count > 0 && !seg.Match(args[argIdx+count-1]) {
 			// The arg at position argIdx+count-1 doesn't match.
@@ -32,7 +32,7 @@ func matchAt(segments []Segment, segIdx int, args []string, argIdx int) bool {
 		}
 
 		// All args in [argIdx, argIdx+count) match — try the rest.
-		if matchAt(segments, segIdx+1, args, argIdx+count) {
+		if count >= seg.Quantifier.Min && matchAt(segments, segIdx+1, args, argIdx+count) {
 			return true
 		}
 	}

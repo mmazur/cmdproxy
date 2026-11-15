@@ -89,7 +89,8 @@ The server config defines per-command allow/deny patterns matched against argume
 3. Args match any `allow` rule → **allow**
 4. No match → **deny**
 
-All matching is case-insensitive.
+String and positional-array rules match case-insensitively. Structured rules
+match case-sensitively, including option names and paths.
 
 Stdin is controlled by server policy. For compatibility, stdin is allowed by default. Set top-level `stdin = false` in a server profile to deny stdin by default, then opt individual commands back in with `stdin = true`:
 
@@ -130,7 +131,7 @@ Relative upload paths keep their original argv value and work because the comman
 
 ### Rule syntax
 
-Both `allow` and `deny` lists support two formats that can be mixed freely:
+Both server `allow` and `deny` lists support three formats that can be mixed freely:
 
 #### String globs
 
@@ -181,6 +182,11 @@ Each element has the form `glob_pattern[:quantifier]`.
 
 Literal colons in glob patterns must be escaped as `\:`. This works directly in single-quoted TOML strings (`'https\://*.example.com'`). In double-quoted strings, backslashes are TOML escape characters, so you need `"https\\://*.example.com"` instead. Prefer single-quoted strings to avoid this issue. Only one unescaped colon is allowed per element. Invalid quantifiers are rejected at config load time.
 
+Compatibility note: quantified segments now check every consumed argument. A
+previous bug could skip earlier values when the minimum count was at least two
+(for example, `:2` or `:2+`). Such nonmatching arguments are now rejected in
+server and shim rules alike.
+
 **Examples:**
 
 ```toml
@@ -209,6 +215,172 @@ deny = [
     ['[a-z]*:*', 'delete', '*:*'],
 ]
 ```
+
+#### Structured rules with named options
+
+Use a structured rule when the command/subcommand order matters but its options
+may appear in any order. For this example, `tool` is a fictional CLI:
+
+```toml
+[[command.tool.allow]]
+prefix = ['group', '{create,remove}']
+options = [
+    ['--workspace', 'sandbox'],
+    ['{--name,-n}', 'scratch-*'],
+]
+```
+
+This allows both `tool group remove --workspace sandbox -n scratch-one` and
+`tool group remove --name=scratch-one --workspace=sandbox`. Each compact option
+list declares its name (or brace-separated literal aliases), followed by its
+value patterns. Each option is required **exactly once**, counting all its
+aliases together. `['--confirm']` declares a required switch with no value.
+
+For optional, forbidden, or repeatable options, use explicit objects. Both forms
+can appear in the same `options` list. This is equivalent to the compact rule
+above, with an additional optional switch:
+
+```toml
+[[command.tool.allow]]
+prefix = ['group', '{create,remove}']
+options = [
+    { names = ['--workspace'], values = ['sandbox'] },
+    { names = ['--name', '-n'], values = ['scratch-*'], occurs = '1' },
+    { names = ['--confirm'], values = [], occurs = '?' },
+]
+```
+
+`occurs` counts option occurrences across aliases, independently of the number
+of values each occurrence consumes. Its default is `'1'` in both forms. It
+accepts the positional quantifiers without the colon: `'?'` (zero or one),
+`'0'` (forbidden), `'N'`, `'N-M'`, `'N+'`, `'*'`, or `'+'`. Every occurrence's
+values must match, even when repetition is explicitly allowed. Duplicate
+selectors fail by default, including identical values and mixed spellings such
+as `-n scratch-one --name=scratch-one`.
+
+The complete matching rules are:
+
+- `prefix` is a nonempty, ordered list of one-argument globs anchored at argv
+  zero. Quantifiers and option arguments are not allowed in the prefix. Options
+  before or between prefix arguments do not match. This format currently requires
+  an initial non-option argument, typically a subcommand; use existing string or
+  positional rules for flag-only invocations.
+- After the prefix, declared options can appear in any order, interspersed with
+  bare positional arguments. **Unknown options fail the rule.** Names are exact,
+  case-sensitive spellings: long names such as `--workspace` or single-character
+  short names such as `-n`. Wildcard names, abbreviations, joined short values
+  (`-nNAME`), and short clusters (`-it`) are not supported. Write `-n NAME` and
+  `-i -t` instead.
+- One-value options accept `--name VALUE`, `--name=VALUE`, and `-n VALUE` for
+  declared aliases. Short assignments such as `-n=VALUE` are rejected because
+  some programs interpret their value as `=VALUE`. Long assignments split at
+  the first `=` only. Empty and dash-leading option values are rejected,
+  including assignment forms. Switches
+  have `values = []` and cannot take assignments such as `--confirm=true`.
+- `values` uses the positional segment grammar, including escaped literal
+  colons. Use exact-one segments for fixed tuples, or a single repeated segment
+  such as `'scratch-*:2'` or `'scratch-*:+'`. All values must match. Optional-value
+  segments and mixtures of quantified segments are rejected at config load.
+- Fixed-count options consume exactly that many following arguments.
+  Variable-count options consume the entire consecutive run of non-option
+  values up to the next option or `--`. They cannot be combined with
+  `positionals`, and do not accept assignment syntax. Excess or disallowed
+  values fail the rule; they are never reassigned to positionals.
+- Remaining bare arguments match the ordered `positionals` list using the usual
+  segment grammar. Omitted means no positionals. Even `positionals = ['*:*']`
+  cannot absorb undeclared options. Option values cannot satisfy positionals
+  or other required options. A standalone `-` is also rejected before the `--`
+  separator, including as a positional or stdin marker.
+- All prefix, value, positional, and tail patterns in this format are
+  case-sensitive. Globs retain their usual semantics: `*` can span `/` and
+  does not validate or canonicalize path components.
+
+For example, a batch command can allow one occurrence with several values:
+
+```toml
+[[command.tool.allow]]
+prefix = ['batch', 'remove']
+options = [['--items', 'scratch-*:+']]
+```
+
+`tool batch remove --items scratch-one scratch-two` matches. An unrelated item,
+a repeated `--items`, or `--items=scratch-one` fails this rule. Use a separate
+closed rule for a different selector form; combining the selectors then fails
+both rules. The matcher assigns no built-in meaning to any option name.
+
+**The `--` boundary:** by default a standalone `--` fails a structured rule. To
+require it, add `after_double_dash`, an ordered pattern for the complete raw tail:
+
+```toml
+[[command.tool.allow]]
+prefix = ['exec']
+positionals = ['worker-*']
+options = [
+    ['--config', '/tmp/sandbox/*.conf'],
+    { names = ['--pool', '-p'], values = ['test'], occurs = '?' },
+]
+after_double_dash = ['*:+']
+```
+
+This permits `tool exec worker-one --config /tmp/sandbox/client.conf -- echo hello`.
+It rejects `tool exec worker-one -- echo --config /tmp/sandbox/client.conf`:
+arguments after the first separator cannot satisfy outer options. The tail is
+matched literally as argv; later separators and option-like tokens are ordinary
+tail arguments. `after_double_dash = []` requires a separator with an empty
+tail. Use a narrower tail such as `['echo', 'hello']` to restrict the executed
+command, rather than allowing arbitrary tail arguments.
+
+**Reusing long value patterns:** define flat, named lists at the profile's top
+level and use `values_ref` instead of `values` in an explicit option:
+
+```toml
+[value_sets]
+owned_names = ['{scratch-*,experiment-*}']
+
+[[command.tool.allow]]
+prefix = ['item', 'remove']
+options = [
+    { names = ['--name', '-n'], values_ref = 'owned_names' },
+]
+```
+
+Value sets use the same value-segment syntax. They have no interpolation,
+inheritance, or nested references. Referenced value sets must not be empty;
+declare switches explicitly with `values = []`. Unknown references, overlapping
+aliases, invalid patterns/counts, and unknown rule/option fields fail config loading.
+
+Each `[[command.tool.allow]]` block adds an alternative rule. To mix formats,
+put structured rules in an ordinary array as inline tables:
+
+```toml
+[command.tool]
+allow = [
+    'version *',
+    ['status'],
+    { prefix = ['item', 'show'], options = [['--name', 'scratch-*']] },
+]
+deny = [
+    { prefix = ['item', 'show'], options = [['--name', 'scratch-protected']] },
+]
+```
+
+Do not define both `allow = [...]` and `[[command.tool.allow]]` for the same
+command; TOML treats that as redefining the same key. Structured rules are
+server-only; shim `run_local` and upload rules keep their existing syntax.
+
+Evaluation is unchanged: matching deny rules win, then any matching allow wins.
+A structured rule failing on an unknown option or a duplicate is a **non-match**,
+not a global veto. Another broad allow can still authorize that invocation, so
+retain existing deny guards until overlapping allows have been audited. Replacing
+wildcard gaps with a closed option vocabulary deliberately requires declaring
+each additional permitted option. Old binaries reject structured rule entries.
+
+Structured deny rules also match only their complete declared shape. In the
+example above, adding an undeclared `--verbose`, a positional argument, or `--`
+makes the structured deny a non-match. If a broad allow such as `'item *'` were
+added, it would then authorize those arguments. Keep suitably scoped string or
+positional deny globs for guards against broad allows; a structured deny is not
+an unconditional ban on a selector wherever it appears.
 
 ## Building
 

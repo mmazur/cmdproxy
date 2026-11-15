@@ -13,11 +13,12 @@ import (
 )
 
 // Rule is a single entry in an allow or deny list.
-// Either LegacyGlob or Segments is set, never both.
+// Exactly one of LegacyGlob, Segments, or Named is set.
 type Rule struct {
-	LegacyGlob string             // non-empty for plain string entries
-	Compiled   glob.Glob          // pre-compiled glob (only for LegacyGlob)
-	Segments   []argmatch.Segment // non-nil for list entries
+	LegacyGlob string              // non-empty for plain string entries
+	Compiled   glob.Glob           // pre-compiled glob (only for LegacyGlob)
+	Segments   []argmatch.Segment  // non-nil for list entries
+	Named      *argmatch.NamedRule // non-nil for structured server rules
 }
 
 type ServerCommandConfig struct {
@@ -41,8 +42,9 @@ type rawServerCommandConfig struct {
 }
 
 type rawServerConfig struct {
-	Stdin    *bool                             `toml:"stdin"`
-	Commands map[string]rawServerCommandConfig `toml:"command"`
+	Stdin     *bool                             `toml:"stdin"`
+	Commands  map[string]rawServerCommandConfig `toml:"command"`
+	ValueSets map[string][]string               `toml:"value_sets"`
 }
 
 func LoadServerConfig(profileName string) (ServerConfig, error) {
@@ -61,6 +63,11 @@ func LoadServerConfig(profileName string) (ServerConfig, error) {
 }
 
 func parseRawConfig(raw rawServerConfig) (ServerConfig, error) {
+	for name, patterns := range raw.ValueSets {
+		if _, err := argmatch.ParseCaseSensitiveSegments(patterns); err != nil {
+			return ServerConfig{}, fmt.Errorf("value_sets.%s: %w", name, err)
+		}
+	}
 	stdinDefault := true
 	if raw.Stdin != nil {
 		stdinDefault = *raw.Stdin
@@ -72,7 +79,7 @@ func parseRawConfig(raw rawServerConfig) (ServerConfig, error) {
 	}
 
 	for cmd, rawCC := range raw.Commands {
-		cc, err := parseCommandConfig(rawCC, stdinDefault)
+		cc, err := parseCommandConfig(rawCC, stdinDefault, raw.ValueSets)
 		if err != nil {
 			return ServerConfig{}, fmt.Errorf("command %q: %w", cmd, err)
 		}
@@ -82,12 +89,12 @@ func parseRawConfig(raw rawServerConfig) (ServerConfig, error) {
 	return cfg, nil
 }
 
-func parseCommandConfig(raw rawServerCommandConfig, stdinDefault bool) (ServerCommandConfig, error) {
-	allow, err := ParseRules(raw.Allow, "allow")
+func parseCommandConfig(raw rawServerCommandConfig, stdinDefault bool, valueSets map[string][]string) (ServerCommandConfig, error) {
+	allow, err := parseRules(raw.Allow, "allow", true, valueSets)
 	if err != nil {
 		return ServerCommandConfig{}, err
 	}
-	deny, err := ParseRules(raw.Deny, "deny")
+	deny, err := parseRules(raw.Deny, "deny", true, valueSets)
 	if err != nil {
 		return ServerCommandConfig{}, err
 	}
@@ -104,6 +111,9 @@ func parseCommandConfig(raw rawServerCommandConfig, stdinDefault bool) (ServerCo
 }
 
 func MatchRule(rule Rule, args []string) bool {
+	if rule.Named != nil {
+		return rule.Named.Match(args)
+	}
 	if rule.LegacyGlob != "" {
 		return rule.Compiled.Match(strings.ToLower(strings.Join(args, " ")))
 	}
@@ -111,6 +121,10 @@ func MatchRule(rule Rule, args []string) bool {
 }
 
 func ParseRules(entries []any, label string) ([]Rule, error) {
+	return parseRules(entries, label, false, nil)
+}
+
+func parseRules(entries []any, label string, structured bool, valueSets map[string][]string) ([]Rule, error) {
 	var rules []Rule
 	for i, entry := range entries {
 		switch v := entry.(type) {
@@ -139,8 +153,18 @@ func ParseRules(entries []any, label string) ([]Rule, error) {
 			}
 			rules = append(rules, Rule{Segments: segs})
 
+		case map[string]any:
+			if !structured {
+				return nil, fmt.Errorf("%s[%d]: structured rules are only supported in server allow/deny", label, i)
+			}
+			named, err := parseNamedRule(v, valueSets)
+			if err != nil {
+				return nil, fmt.Errorf("%s[%d]: %w", label, i, err)
+			}
+			rules = append(rules, Rule{Named: named})
+
 		default:
-			return nil, fmt.Errorf("%s[%d]: expected string or array, got %T", label, i, entry)
+			return nil, fmt.Errorf("%s[%d]: expected string, array, or server rule table, got %T", label, i, entry)
 		}
 	}
 	return rules, nil

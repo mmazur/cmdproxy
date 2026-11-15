@@ -1,0 +1,222 @@
+package argmatch
+
+import (
+	"fmt"
+	"strings"
+)
+
+// OptionSpec declares literal aliases, value segments, and an occurrence limit.
+// An empty Occurs defaults to exactly one occurrence, across all aliases.
+type OptionSpec struct {
+	Names  []string
+	Values []string
+	Occurs string
+}
+
+// NamedSpec describes an ordered prefix followed by interspersed options and
+// positionals. A nil AfterDoubleDash forbids --; a non-nil list requires it.
+type NamedSpec struct {
+	Prefix          []string
+	Options         []OptionSpec
+	Positionals     []string
+	AfterDoubleDash []string
+}
+
+type namedOption struct {
+	values []Segment
+	occurs Quantifier
+	// -1 means a variable-length run; otherwise the exact value count.
+	arity int
+}
+
+// NamedRule is immutable after compilation and safe for concurrent matching.
+type NamedRule struct {
+	prefix      []Segment
+	options     []namedOption
+	names       map[string]int
+	positionals []Segment
+	tail        []Segment
+	hasTail     bool
+}
+
+// CompileNamed validates a closed option vocabulary and compiles its patterns.
+// Unlike legacy positional rules, all structured-rule matching is case-sensitive.
+func CompileNamed(spec NamedSpec) (*NamedRule, error) {
+	if len(spec.Prefix) == 0 {
+		return nil, fmt.Errorf("prefix must not be empty")
+	}
+	r := &NamedRule{names: make(map[string]int), hasTail: spec.AfterDoubleDash != nil}
+	var err error
+	r.prefix, err = ParseCaseSensitiveSegments(spec.Prefix)
+	if err != nil {
+		return nil, fmt.Errorf("prefix: %w", err)
+	}
+	for i, pattern := range spec.Prefix {
+		_, _, quantified, _ := splitSegment(pattern)
+		if quantified || strings.HasPrefix(pattern, "-") {
+			return nil, fmt.Errorf("prefix[%d]: expected an unquantified non-option glob", i)
+		}
+	}
+	r.positionals, err = ParseCaseSensitiveSegments(spec.Positionals)
+	if err != nil {
+		return nil, fmt.Errorf("positionals: %w", err)
+	}
+	r.tail, err = ParseCaseSensitiveSegments(spec.AfterDoubleDash)
+	if err != nil {
+		return nil, fmt.Errorf("after_double_dash: %w", err)
+	}
+	for i, opt := range spec.Options {
+		if err := r.addOption(i, opt); err != nil {
+			return nil, fmt.Errorf("options[%d]: %w", i, err)
+		}
+	}
+	return r, nil
+}
+
+func validOptionName(name string) bool {
+	if strings.HasPrefix(name, "--") {
+		name = name[2:]
+	} else if len(name) == 2 && name[0] == '-' {
+		name = name[1:]
+	} else {
+		return false
+	}
+	if name == "" || name[0] == '-' || name[0] == '_' {
+		return false
+	}
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *NamedRule) addOption(index int, spec OptionSpec) error {
+	if len(spec.Names) == 0 {
+		return fmt.Errorf("names must not be empty")
+	}
+	for _, name := range spec.Names {
+		if !validOptionName(name) {
+			return fmt.Errorf("invalid literal option name %q", name)
+		}
+		if _, exists := r.names[name]; exists {
+			return fmt.Errorf("duplicate option alias %q", name)
+		}
+		r.names[name] = index
+	}
+	if spec.Occurs == "" {
+		spec.Occurs = "1"
+	}
+	q, err := parseQuantifier(spec.Occurs)
+	if err != nil {
+		return fmt.Errorf("occurs: %w", err)
+	}
+	values, err := ParseCaseSensitiveSegments(spec.Values)
+	if err != nil {
+		return fmt.Errorf("values: %w", err)
+	}
+	opt := namedOption{values: values, occurs: q, arity: len(values)}
+	for _, value := range values {
+		count := value.Quantifier
+		if count.Min < 1 || len(values) > 1 && (count.Min != 1 || count.Max != 1) {
+			return fmt.Errorf("values must be exact-one segments or one repeated segment with minimum at least one")
+		}
+		if len(values) == 1 {
+			opt.arity = count.Min
+			if count.Min != count.Max {
+				opt.arity = -1
+				if len(r.positionals) != 0 {
+					return fmt.Errorf("variable value count cannot be combined with positionals")
+				}
+			}
+		}
+	}
+	r.options = append(r.options, opt)
+	return nil
+}
+
+func optionValue(value string) bool {
+	return value != "" && !strings.HasPrefix(value, "-")
+}
+
+// Match accounts for the complete argv. It never searches inside option values
+// or the -- tail for a required option, nor backtracks over option boundaries.
+func (r *NamedRule) Match(args []string) bool {
+	if len(args) < len(r.prefix) {
+		return false
+	}
+	for i := range r.prefix {
+		if strings.HasPrefix(args[i], "-") || !r.prefix[i].Match(args[i]) {
+			return false
+		}
+	}
+	args = args[len(r.prefix):]
+	counts := make([]int, len(r.options))
+	var positionals []string
+	separator := false
+	for i := 0; i < len(args); {
+		token := args[i]
+		if token == "--" {
+			if !r.hasTail || !Match(r.tail, args[i+1:]) {
+				return false
+			}
+			separator = true
+			break
+		}
+		if !strings.HasPrefix(token, "-") {
+			positionals = append(positionals, token)
+			i++
+			continue
+		}
+		name, assigned, hasAssignment := strings.Cut(token, "=")
+		// Short assignments are ambiguous: getopt-style parsers treat -n=X
+		// as a joined value of "=X", rather than the long-option value "X".
+		if hasAssignment && !strings.HasPrefix(name, "--") {
+			return false
+		}
+		index, exists := r.names[name]
+		if !exists {
+			return false
+		}
+		opt := &r.options[index]
+		counts[index]++
+		if opt.occurs.Max != -1 && counts[index] > opt.occurs.Max {
+			return false
+		}
+		i++
+		if hasAssignment {
+			if opt.arity != 1 || !optionValue(assigned) || !Match(opt.values, []string{assigned}) {
+				return false
+			}
+			continue
+		}
+		start := i
+		if opt.arity == -1 {
+			for i < len(args) && optionValue(args[i]) {
+				i++
+			}
+		} else {
+			if opt.arity > len(args)-i {
+				return false
+			}
+			for end := i + opt.arity; i < end; i++ {
+				if !optionValue(args[i]) {
+					return false
+				}
+			}
+		}
+		if !Match(opt.values, args[start:i]) {
+			return false
+		}
+	}
+	if separator != r.hasTail || !Match(r.positionals, positionals) {
+		return false
+	}
+	for i, opt := range r.options {
+		if counts[i] < opt.occurs.Min {
+			return false
+		}
+	}
+	return true
+}
