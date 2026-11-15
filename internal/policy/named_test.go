@@ -154,3 +154,44 @@ options = [['--workspace', 'sandbox'], ['--scope', '/']]
 		}
 	}
 }
+
+func TestNamedExtraArgsPolicy(t *testing.T) {
+	for _, options := range []string{
+		`[['--workspace', 'sandbox'], ['{--name,-n}', 'scratch-*']]`,
+		`[{ names = ['--workspace'], values = ['sandbox'] }, { names = ['--name', '-n'], values = ['scratch-*'] }]`,
+	} {
+		t.Run(options, func(t *testing.T) {
+			cfg := loadNamedTestConfig(t, `
+[command.tool]
+allow = [{ prefix = ['group', 'remove'], allow_extra_args = true, options = `+options+` }]
+deny = [
+  ['*:*', '{--endpoint,--endpoint=*}', '*:*'],
+  { prefix = ['group', 'remove'], allow_extra_args = true, options = [['{--name,-n}', 'scratch-protected']] },
+]
+
+[command.strict]
+allow = [{ prefix = ['group', 'remove'], allow_extra_args = false, options = `+options+` }]
+`)
+			for _, tc := range []struct {
+				args string
+				want Verdict
+			}{
+				{"group remove --workspace sandbox -n scratch-one --confirm --region test", Allow},
+				{"group remove --region=test extra --name=scratch-one --workspace=sandbox", Allow},
+				{"group remove --confirm --workspace sandbox", Deny},
+				{"group remove --workspace sandbox -n unrelated --confirm", Deny},
+				{"group remove --workspace sandbox -n scratch-one --name=scratch-two --confirm", Deny},
+				{"group remove --workspace sandbox -n scratch-one --endpoint=other --confirm", Deny},
+				{"group remove --workspace sandbox -n scratch-protected --confirm", Deny},
+				{"group remove --workspace sandbox --confirm -- -n scratch-one", Deny},
+			} {
+				if got := Evaluate(cfg, "tool", strings.Fields(tc.args)); got.Verdict != tc.want {
+					t.Errorf("%s: %v, want %v", tc.args, got, tc.want)
+				}
+			}
+			if got := Evaluate(cfg, "strict", strings.Fields("group remove --workspace sandbox -n scratch-one --confirm")); got.Verdict != Deny {
+				t.Fatal("explicit false enabled passthrough")
+			}
+		})
+	}
+}

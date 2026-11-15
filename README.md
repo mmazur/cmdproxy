@@ -266,8 +266,8 @@ The complete matching rules are:
   an initial non-option argument, typically a subcommand; use existing string or
   positional rules for flag-only invocations.
 - After the prefix, declared options can appear in any order, interspersed with
-  bare positional arguments. **Unknown options fail the rule.** Names are exact,
-  case-sensitive spellings: long names such as `--workspace` or single-character
+  bare positional arguments. **Unknown options fail the rule by default.** Names
+  are exact, case-sensitive spellings: long names such as `--workspace` or single-character
   short names such as `-n`. Wildcard names, abbreviations, joined short values
   (`-nNAME`), and short clusters (`-it`) are not supported. Write `-n NAME` and
   `-i -t` instead.
@@ -287,13 +287,54 @@ The complete matching rules are:
   `positionals`, and do not accept assignment syntax. Excess or disallowed
   values fail the rule; they are never reassigned to positionals.
 - Remaining bare arguments match the ordered `positionals` list using the usual
-  segment grammar. Omitted means no positionals. Even `positionals = ['*:*']`
-  cannot absorb undeclared options. Option values cannot satisfy positionals
-  or other required options. A standalone `-` is also rejected before the `--`
+  segment grammar. Omitted means no positionals in strict mode. In strict mode,
+  even `positionals = ['*:*']` cannot absorb undeclared options. Declared option
+  values cannot satisfy positionals or other required options. A standalone `-`
+  is also rejected before the `--`
   separator, including as a positional or stdin marker.
 - All prefix, value, positional, and tail patterns in this format are
   case-sensitive. Globs retain their usual semantics: `*` can span `/` and
   does not validate or canonicalize path components.
+
+**Optional passthrough:** set `allow_extra_args = true` to constrain only the
+declared options while permitting unrelated arguments:
+
+```toml
+[[command.tool.allow]]
+prefix = ['group', 'remove']
+allow_extra_args = true
+options = [
+    ['--workspace', 'sandbox'],
+    ['{--name,-n}', 'scratch-*'],
+]
+```
+
+This also permits `tool group remove --region test --workspace sandbox
+-n scratch-one --confirm`. Both compact and explicit option declarations work
+with this setting. The default is `false`; existing rules stay strict.
+
+Declared options still enforce required occurrences, alias counts, and every
+value constraint. A bad or repeated declared option cannot escape as an extra
+argument. The prefix and `--` boundary are unchanged, and deny rules still take
+precedence. Joined/clustered short options, short assignments, malformed option
+names, and a standalone `-` before the separator remain rejected.
+
+When `positionals` is omitted in this mode, leftover bare arguments pass through
+too. If `positionals` is explicitly provided (including `[]`), it must match all
+leftover bare arguments in order. This includes values of undeclared options,
+because cmdproxy does not know which tokens those options consume. Variable-count
+declared options still consume their complete value run; a bad value is never
+reclassified as an extra argument.
+
+**This mode is intentionally weaker.** Cmdproxy scans undeclared options as raw
+tokens without inferring their value arities. For example, `tool group remove
+--description --name scratch-one --workspace sandbox` matches this rule even if
+the actual program consumes `--name` as the value of `--description`. Unknown
+options may also introduce alternative selectors or overrides. Keep appropriate
+deny guards for conflicting selectors; they do not remove this parsing
+uncertainty. Declare options with explicit value arities when that distinction
+matters. Text inside a single argv value is never split into additional options,
+and arguments after `--` never satisfy outer option requirements.
 
 For example, a batch command can allow one occurrence with several values:
 
@@ -371,12 +412,14 @@ server-only; shim `run_local` and upload rules keep their existing syntax.
 Evaluation is unchanged: matching deny rules win, then any matching allow wins.
 A structured rule failing on an unknown option or a duplicate is a **non-match**,
 not a global veto. Another broad allow can still authorize that invocation, so
-retain existing deny guards until overlapping allows have been audited. Replacing
-wildcard gaps with a closed option vocabulary deliberately requires declaring
-each additional permitted option. Old binaries reject structured rule entries.
+retain existing deny guards until overlapping allows have been audited. In strict
+mode, replacing wildcard gaps with a closed option vocabulary requires declaring
+each additional permitted option. Use `allow_extra_args = true` to retain a
+permissive remainder with the weaker guarantees described above. Old binaries
+reject structured rule entries.
 
-Structured deny rules also match only their complete declared shape. In the
-example above, adding an undeclared `--verbose`, a positional argument, or `--`
+By default, structured deny rules also match only their complete declared shape.
+In the example above, adding an undeclared `--verbose`, a positional argument, or `--`
 makes the structured deny a non-match. If a broad allow such as `'item *'` were
 added, it would then authorize those arguments. Keep suitably scoped string or
 positional deny globs for guards against broad allows; a structured deny is not

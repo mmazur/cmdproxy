@@ -75,6 +75,30 @@ options = [{ names = ['--name'], values_ref = 'empty' }]
 	}
 }
 
+func TestNamedExtraArgsExplicitPositionals(t *testing.T) {
+	for _, tc := range []struct {
+		positionals string
+		want        bool
+	}{
+		{"", true},
+		{"positionals = []", false},
+		{"positionals = ['worker-*']", true},
+	} {
+		cfg, err := decodeNamedConfig(t, `
+[[command.tool.allow]]
+prefix = ['exec']
+allow_extra_args = true
+options = [['--config', 'safe.conf']]
+`+tc.positionals)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := MatchRule(cfg.Commands["tool"].Allow[0], strings.Fields("exec worker-one --quiet --config safe.conf")); got != tc.want {
+			t.Errorf("%q: got %v, want %v", tc.positionals, got, tc.want)
+		}
+	}
+}
+
 func TestNamedArrayOfTables(t *testing.T) {
 	cfg, err := decodeNamedConfig(t, `
 [[command.tool.allow]]
@@ -140,6 +164,8 @@ func TestNamedConfigErrors(t *testing.T) {
 		{"prefix item", `{ prefix = [42] }`, "prefix:"},
 		{"prefix quantifier", `{ prefix = ['run:+'] }`, "prefix[0]"},
 		{"unknown rule key", `{ prefix = ['run'], option = [] }`, `unknown field "option"`},
+		{"extra args type", `{ prefix = ['run'], allow_extra_args = 'true' }`, "allow_extra_args: expected boolean"},
+		{"extra args numeric", `{ prefix = ['run'], allow_extra_args = 1 }`, "allow_extra_args: expected boolean"},
 		{"options type", `{ prefix = ['run'], options = {} }`, "options:"},
 		{"option type", `{ prefix = ['run'], options = [42] }`, "options[0]"},
 		{"empty compact", `{ prefix = ['run'], options = [[]] }`, "compact option"},

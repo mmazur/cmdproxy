@@ -15,11 +15,14 @@ type OptionSpec struct {
 
 // NamedSpec describes an ordered prefix followed by interspersed options and
 // positionals. A nil AfterDoubleDash forbids --; a non-nil list requires it.
+// AllowExtraArgs permits undeclared options and, when Positionals is nil,
+// unmatched bare arguments. It does not infer undeclared options' value arities.
 type NamedSpec struct {
 	Prefix          []string
 	Options         []OptionSpec
 	Positionals     []string
 	AfterDoubleDash []string
+	AllowExtraArgs  bool
 }
 
 type namedOption struct {
@@ -31,21 +34,28 @@ type namedOption struct {
 
 // NamedRule is immutable after compilation and safe for concurrent matching.
 type NamedRule struct {
-	prefix      []Segment
-	options     []namedOption
-	names       map[string]int
-	positionals []Segment
-	tail        []Segment
-	hasTail     bool
+	prefix           []Segment
+	options          []namedOption
+	names            map[string]int
+	positionals      []Segment
+	tail             []Segment
+	hasTail          bool
+	allowExtraArgs   bool
+	checkPositionals bool
 }
 
-// CompileNamed validates a closed option vocabulary and compiles its patterns.
+// CompileNamed validates the option declarations and compiles their patterns.
 // Unlike legacy positional rules, all structured-rule matching is case-sensitive.
 func CompileNamed(spec NamedSpec) (*NamedRule, error) {
 	if len(spec.Prefix) == 0 {
 		return nil, fmt.Errorf("prefix must not be empty")
 	}
-	r := &NamedRule{names: make(map[string]int), hasTail: spec.AfterDoubleDash != nil}
+	r := &NamedRule{
+		names:            make(map[string]int),
+		hasTail:          spec.AfterDoubleDash != nil,
+		allowExtraArgs:   spec.AllowExtraArgs,
+		checkPositionals: !spec.AllowExtraArgs || spec.Positionals != nil,
+	}
 	var err error
 	r.prefix, err = ParseCaseSensitiveSegments(spec.Prefix)
 	if err != nil {
@@ -140,8 +150,9 @@ func optionValue(value string) bool {
 	return value != "" && !strings.HasPrefix(value, "-")
 }
 
-// Match accounts for the complete argv. It never searches inside option values
-// or the -- tail for a required option, nor backtracks over option boundaries.
+// Match never searches inside declared option values or the -- tail for a
+// required option, nor backtracks over option boundaries. In permissive mode,
+// undeclared tokens pass through without interpreting their value arities.
 func (r *NamedRule) Match(args []string) bool {
 	if len(args) < len(r.prefix) {
 		return false
@@ -165,7 +176,9 @@ func (r *NamedRule) Match(args []string) bool {
 			break
 		}
 		if !strings.HasPrefix(token, "-") {
-			positionals = append(positionals, token)
+			if r.checkPositionals {
+				positionals = append(positionals, token)
+			}
 			i++
 			continue
 		}
@@ -177,6 +190,10 @@ func (r *NamedRule) Match(args []string) bool {
 		}
 		index, exists := r.names[name]
 		if !exists {
+			if r.allowExtraArgs && validOptionName(name) {
+				i++
+				continue
+			}
 			return false
 		}
 		opt := &r.options[index]
@@ -210,7 +227,7 @@ func (r *NamedRule) Match(args []string) bool {
 			return false
 		}
 	}
-	if separator != r.hasTail || !Match(r.positionals, positionals) {
+	if separator != r.hasTail || r.checkPositionals && !Match(r.positionals, positionals) {
 		return false
 	}
 	for i, opt := range r.options {

@@ -40,10 +40,17 @@ func stringList(value any) ([]string, error) {
 }
 
 func parseNamedRule(table map[string]any, valueSets map[string][]string) (*argmatch.NamedRule, error) {
-	if err := checkFields(table, "prefix", "options", "positionals", "after_double_dash"); err != nil {
+	if err := checkFields(table, "prefix", "options", "positionals", "after_double_dash", "allow_extra_args"); err != nil {
 		return nil, err
 	}
 	var spec argmatch.NamedSpec
+	if raw, exists := table["allow_extra_args"]; exists {
+		var ok bool
+		spec.AllowExtraArgs, ok = raw.(bool)
+		if !ok {
+			return nil, fmt.Errorf("allow_extra_args: expected boolean, got %T", raw)
+		}
+	}
 	for _, field := range []struct {
 		name string
 		dest *[]string
