@@ -150,16 +150,41 @@ func optionValue(value string) bool {
 	return value != "" && !strings.HasPrefix(value, "-")
 }
 
-// Match never searches inside declared option values or the -- tail for a
+// MatchResult describes a match, a syntax rejection, or another mismatch.
+type MatchResult int
+
+const (
+	// NoMatch is a mismatch after the prefix matched, without a syntax diagnosis.
+	NoMatch MatchResult = iota
+	// Unrelated indicates that the rule did not recognize the command prefix.
+	Unrelated
+	Matched
+	ShortAssignment
+	JoinedShortOption
+	SwitchAssignment
+	MultiValueAssignment
+	MissingOptionValue
+	InvalidOptionValue
+	StandaloneDash
+	UnexpectedSeparator
+	MissingSeparator
+)
+
+// Match reports whether args satisfy the named rule.
+func (r *NamedRule) Match(args []string) bool {
+	return r.Check(args) == Matched
+}
+
+// Check never searches inside declared option values or the -- tail for a
 // required option, nor backtracks over option boundaries. In permissive mode,
 // undeclared tokens pass through without interpreting their value arities.
-func (r *NamedRule) Match(args []string) bool {
+func (r *NamedRule) Check(args []string) MatchResult {
 	if len(args) < len(r.prefix) {
-		return false
+		return Unrelated
 	}
 	for i := range r.prefix {
 		if strings.HasPrefix(args[i], "-") || !r.prefix[i].Match(args[i]) {
-			return false
+			return Unrelated
 		}
 	}
 	args = args[len(r.prefix):]
@@ -169,8 +194,11 @@ func (r *NamedRule) Match(args []string) bool {
 	for i := 0; i < len(args); {
 		token := args[i]
 		if token == "--" {
-			if !r.hasTail || !Match(r.tail, args[i+1:]) {
-				return false
+			if !r.hasTail {
+				return UnexpectedSeparator
+			}
+			if !Match(r.tail, args[i+1:]) {
+				return NoMatch
 			}
 			separator = true
 			break
@@ -183,10 +211,29 @@ func (r *NamedRule) Match(args []string) bool {
 			continue
 		}
 		name, assigned, hasAssignment := strings.Cut(token, "=")
+		if token == "-" {
+			return StandaloneDash
+		}
+		if len(name) > 2 && !strings.HasPrefix(name, "--") && validOptionName(name[:2]) {
+			_, declared := r.names[name[:2]]
+			if (declared || r.allowExtraArgs) && strings.Trim(name[1:], "0123456789") != "" {
+				return JoinedShortOption
+			}
+			return NoMatch
+		}
 		// Short assignments are ambiguous: getopt-style parsers treat -n=X
 		// as a joined value of "=X", rather than the long-option value "X".
 		if hasAssignment && !strings.HasPrefix(name, "--") {
-			return false
+			if index, declared := r.names[name]; declared {
+				if r.options[index].arity == 0 {
+					return SwitchAssignment
+				}
+				return ShortAssignment
+			}
+			if r.allowExtraArgs && validOptionName(name) {
+				return ShortAssignment
+			}
+			return NoMatch
 		}
 		index, exists := r.names[name]
 		if !exists {
@@ -194,17 +241,27 @@ func (r *NamedRule) Match(args []string) bool {
 				i++
 				continue
 			}
-			return false
+			return NoMatch
 		}
 		opt := &r.options[index]
 		counts[index]++
 		if opt.occurs.Max != -1 && counts[index] > opt.occurs.Max {
-			return false
+			return NoMatch
 		}
 		i++
 		if hasAssignment {
-			if opt.arity != 1 || !optionValue(assigned) || !Match(opt.values, []string{assigned}) {
-				return false
+			switch opt.arity {
+			case 0:
+				return SwitchAssignment
+			case 1:
+				if !optionValue(assigned) {
+					return InvalidOptionValue
+				}
+			default:
+				return MultiValueAssignment
+			}
+			if !Match(opt.values, []string{assigned}) {
+				return NoMatch
 			}
 			continue
 		}
@@ -213,27 +270,36 @@ func (r *NamedRule) Match(args []string) bool {
 			for i < len(args) && optionValue(args[i]) {
 				i++
 			}
+			if i-start < opt.values[0].Quantifier.Min {
+				if i < len(args) && args[i] == "" {
+					return InvalidOptionValue
+				}
+				return MissingOptionValue
+			}
 		} else {
 			if opt.arity > len(args)-i {
-				return false
+				return MissingOptionValue
 			}
 			for end := i + opt.arity; i < end; i++ {
 				if !optionValue(args[i]) {
-					return false
+					return InvalidOptionValue
 				}
 			}
 		}
 		if !Match(opt.values, args[start:i]) {
-			return false
+			return NoMatch
 		}
 	}
-	if separator != r.hasTail || r.checkPositionals && !Match(r.positionals, positionals) {
-		return false
+	if r.checkPositionals && !Match(r.positionals, positionals) {
+		return NoMatch
 	}
 	for i, opt := range r.options {
 		if counts[i] < opt.occurs.Min {
-			return false
+			return NoMatch
 		}
 	}
-	return true
+	if r.hasTail && !separator {
+		return MissingSeparator
+	}
+	return Matched
 }

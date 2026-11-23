@@ -111,13 +111,25 @@ func parseCommandConfig(raw rawServerCommandConfig, stdinDefault bool, valueSets
 }
 
 func MatchRule(rule Rule, args []string) bool {
+	return MatchRuleResult(rule, args) == argmatch.Matched
+}
+
+// MatchRuleResult reports a match or, where the rule recognizes the command
+// prefix, why it failed to match.
+func MatchRuleResult(rule Rule, args []string) argmatch.MatchResult {
 	if rule.Named != nil {
-		return rule.Named.Match(args)
+		return rule.Named.Check(args)
 	}
+	var matched bool
 	if rule.LegacyGlob != "" {
-		return rule.Compiled.Match(strings.ToLower(strings.Join(args, " ")))
+		matched = rule.Compiled.Match(strings.ToLower(strings.Join(args, " ")))
+	} else {
+		matched = argmatch.Match(rule.Segments, args)
 	}
-	return argmatch.Match(rule.Segments, args)
+	if matched {
+		return argmatch.Matched
+	}
+	return argmatch.Unrelated
 }
 
 func ParseRules(entries []any, label string) ([]Rule, error) {

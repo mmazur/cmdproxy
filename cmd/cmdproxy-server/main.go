@@ -34,6 +34,17 @@ func main() {
 	runSSH()
 }
 
+func denialMessage(decision policy.Decision) string {
+	host, _ := os.Hostname()
+	user := os.Getenv("USER")
+	if decision.Hint != "" {
+		return fmt.Sprintf("cmdproxy: denied: %s\nHint: %s\nPolicy is enforced on %s@%s.\n",
+			decision.Reason, decision.Hint, user, host)
+	}
+	return fmt.Sprintf("cmdproxy: denied: %s\nHint: you need allow running this command on %s@%s system\n",
+		decision.Reason, user, host)
+}
+
 func runSSH() {
 	start := time.Now()
 
@@ -68,8 +79,7 @@ func runSSH() {
 	})
 
 	if decision.Verdict == policy.Deny {
-		host, _ := os.Hostname()
-		fmt.Fprintf(os.Stderr, "cmdproxy: denied: %s\nHint: you need allow running this command on %s@%s system\n", decision.Reason, os.Getenv("USER"), host)
+		fmt.Fprint(os.Stderr, denialMessage(decision))
 		os.Exit(126)
 	}
 	workDir, cleanup, err := prepareUpload(req, commandConfig, os.Stdin)
@@ -138,12 +148,9 @@ func runSocket() {
 	})
 
 	if decision.Verdict == policy.Deny {
-		host, _ := os.Hostname()
-		msg := fmt.Sprintf("cmdproxy: denied: %s\nHint: you need allow running this command on %s@%s system\n",
-			decision.Reason, os.Getenv("USER"), host)
 		json.NewEncoder(os.Stdout).Encode(protocol.Response{
 			ExitCode: 126,
-			Stderr:   []byte(msg),
+			Stderr:   []byte(denialMessage(decision)),
 		})
 		return
 	}

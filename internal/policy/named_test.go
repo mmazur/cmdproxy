@@ -105,6 +105,52 @@ deny = [{ prefix = ['item', 'show'], options = [['--name', 'scratch-protected']]
 	}
 }
 
+func TestNamedSyntaxHintPrecedence(t *testing.T) {
+	cfg := loadNamedTestConfig(t, `
+[command.tool]
+allow = [
+  { prefix = ['other'], options = [['--confirm', '*']] },
+  { prefix = ['run'], options = [['--confirm']] },
+]
+deny = [{ prefix = ['run'], options = [['--confirm', 'blocked']] }]
+
+[command.fallback]
+allow = [{ prefix = ['run'], options = [['--confirm']] }, 'run *']
+
+[command.alternatives]
+allow = [
+  { prefix = ['run'], options = [['--confirm']] },
+  { prefix = ['run'], options = [['--confirm', '*'], ['--workspace', 'sandbox']] },
+]
+
+[command.conflict]
+allow = [
+  { prefix = ['run'], options = [['--confirm']] },
+  { prefix = ['run'], options = [['--confirm', '*', '*']] },
+]
+`)
+	for _, tc := range []struct {
+		command string
+		args    string
+		verdict Verdict
+		reason  string
+		hasHint bool
+	}{
+		{"tool", "run --confirm=value", Deny, "takes no value", true},
+		{"tool", "run --confirm=blocked", Deny, "args matched named-option deny rule", false},
+		{"fallback", "run --confirm=value", Allow, "args matched allow pattern", false},
+		{"alternatives", "run --confirm=value", Deny, "no allow pattern matched", false},
+		{"alternatives", "run --confirm=value --workspace=sandbox", Allow, "args matched named-option allow rule", false},
+		{"conflict", "run --confirm=value", Deny, "no allow pattern matched", false},
+	} {
+		got := Evaluate(cfg, tc.command, strings.Fields(tc.args))
+		if got.Verdict != tc.verdict || !strings.Contains(got.Reason, tc.reason) || (got.Hint != "") != tc.hasHint {
+			t.Errorf("%s %q: got %+v, want %v with reason containing %q and hint present = %t",
+				tc.command, tc.args, got, tc.verdict, tc.reason, tc.hasHint)
+		}
+	}
+}
+
 func TestNamedSelectorAlternatives(t *testing.T) {
 	cfg := loadNamedTestConfig(t, `
 [value_sets]

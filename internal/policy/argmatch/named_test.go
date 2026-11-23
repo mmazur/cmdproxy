@@ -267,6 +267,60 @@ func TestNamedRejectsShortAssignments(t *testing.T) {
 	}
 }
 
+func TestNamedSyntaxResults(t *testing.T) {
+	spec := NamedSpec{
+		Prefix: []string{"run"},
+		Options: []OptionSpec{
+			{Names: []string{"--name", "-n"}, Values: []string{"*"}, Occurs: "?"},
+			{Names: []string{"--confirm", "-i"}, Occurs: "?"},
+			{Names: []string{"--items"}, Values: []string{"*", "*"}, Occurs: "?"},
+			{Names: []string{"--labels"}, Values: []string{"*:+"}, Occurs: "?"},
+		},
+	}
+	strict := compileNamedTest(t, spec)
+	spec.AllowExtraArgs = true
+	permissive := compileNamedTest(t, spec)
+	tail := compileNamedTest(t, NamedSpec{Prefix: spec.Prefix, AfterDoubleDash: []string{"-"}})
+
+	for _, tc := range []struct {
+		rule *NamedRule
+		args []string
+		want MatchResult
+	}{
+		{strict, []string{"other", "-n=value"}, Unrelated},
+		{strict, []string{"run", "-n=value"}, ShortAssignment},
+		{strict, []string{"run", "-x=value"}, NoMatch},
+		{permissive, []string{"run", "-x=value"}, ShortAssignment},
+		{strict, []string{"run", "-nvalue"}, JoinedShortOption},
+		{strict, []string{"run", "-it"}, JoinedShortOption},
+		{strict, []string{"run", "-xt"}, NoMatch},
+		{permissive, []string{"run", "-xt"}, JoinedShortOption},
+		{permissive, []string{"run", "-10"}, NoMatch},
+		{strict, []string{"run", "--confirm=false"}, SwitchAssignment},
+		{strict, []string{"run", "-i=false"}, SwitchAssignment},
+		{strict, []string{"run", "--items=first", "second"}, MultiValueAssignment},
+		{strict, []string{"run", "--labels=value"}, MultiValueAssignment},
+		{strict, []string{"run", "--name"}, MissingOptionValue},
+		{strict, []string{"run", "--labels"}, MissingOptionValue},
+		{strict, []string{"run", "--labels", "--confirm"}, MissingOptionValue},
+		{strict, []string{"run", "--name="}, InvalidOptionValue},
+		{strict, []string{"run", "--name=-value"}, InvalidOptionValue},
+		{strict, []string{"run", "--name", "-value"}, InvalidOptionValue},
+		{strict, []string{"run", "--name", ""}, InvalidOptionValue},
+		{permissive, []string{"run", "--labels", ""}, InvalidOptionValue},
+		{permissive, []string{"run", "--labels", "label", ""}, Matched},
+		{strict, []string{"run", "-"}, StandaloneDash},
+		{strict, []string{"run", "--"}, UnexpectedSeparator},
+		{tail, []string{"run"}, MissingSeparator},
+		{tail, []string{"run", "--", "-it"}, NoMatch},
+		{tail, []string{"run", "--", "-"}, Matched},
+	} {
+		if got := tc.rule.Check(tc.args); got != tc.want {
+			t.Errorf("Check(%q) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestCompileNamedErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string
